@@ -41,6 +41,12 @@ Automatic update is on by default. Every 15 minutes `pikiosk-update.timer` fetch
 
 The same action is the Home Assistant button **Update app** and the admin Updates page. yt-dlp has its own daily timer.
 
+## How a video plays
+
+mpv never talks to YouTube. When a video is tapped, `pikioskd` asks yt-dlp to download it (`playback.ytdl_format`, H.264 up to 720p merged into one MKV) into `offline.directory`, records it in the cache index, and then tells mpv to open that local file. The touch grid and Home Assistant show the download percentage while this happens; a cached video starts at once. On boot and after every catalog save the daemon pre-caches the catalog's videos in the background so the first tap is usually instant. Playlists download their first item, start it, and append the rest as they arrive. `offline.max_size_gb` bounds the cache; least-recently-played files go first and catalog items are kept.
+
+YouTube occasionally requires a "PO token" even from yt-dlp's default clients. If `pikiosk-diag` shows errors mentioning `po_token` or `SABR`, install the [bgutil PO-token provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) in script mode (`/opt/pi-kiosk/venv/bin/pip install bgutil-ytdlp-pot-provider`, it uses the Deno the installer already put in `/usr/local/bin`) and restart `pikioskd`. It is not installed by default.
+
 ## Admin and Home Assistant
 
 The admin site is part of `pikioskd` on port 8090. It is how you set the broker, the catalog order, playback defaults, the screen, offline cache, and the touch grid. Passwords already saved are not sent back to the browser.
@@ -89,7 +95,8 @@ On Linux, `make lint test` does the same checks. CI fails if `pikiosk/web/static
 - `sudo -u kiosk /opt/pi-kiosk/bin/pikiosk-diag` prints the commit, versions, unit states, mpv environment, audio sinks, both log tails, and the yt-dlp format list for `ytdlp.test_id` in one go. Paste that when asking for help.
 - `journalctl --user -u pikioskd -f` and `journalctl --user -u pikiosk-mpv -f`. The same output is also in `~kiosk/.cache/pi-kiosk/pikioskd.log` (rotating) and `~kiosk/.cache/pi-kiosk/mpv.log`, which is what the admin Status page tails.
 - HA shows the device unavailable: the broker host in the admin Connection page, Mosquitto credentials, and that the Pi can open port 1883.
-- Video fails immediately: `sudo -u kiosk /opt/pi-kiosk/bin/update-ytdlp.sh`. A cookies file can be set in `ytdlp.cookies_file` if YouTube asks for a sign-in.
+- Video fails immediately: `sudo -u kiosk /opt/pi-kiosk/bin/update-ytdlp.sh`. A cookies file can be set in `ytdlp.cookies_file` if YouTube asks for a sign-in; `ytdlp.extra_args` are passed to every yt-dlp call. The error class on the Status page tells the two cases apart: `extractor`/`bot_check` is YouTube versus yt-dlp, `player` is mpv refusing the file or the display.
+- No sound: the Status page shows the audio output mpv found. "none detected" or `auto_null` means no speaker (HDMI audio, USB, or a HAT) is attached; video still plays.
 - The panel stays on the desktop: labwc `~kiosk/.config/labwc/autostart` should start `pikiosk-session.target` and should not start the panel or file manager.
 - Screen brightness does nothing: `ls /sys/class/backlight` and confirm the `kiosk` user is in the `video` group. The installer does not hard-code `max_brightness`.
 

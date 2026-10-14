@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,7 +51,43 @@ def classify_error(text: str) -> str:
         return "unavailable"
     if any(token in lowered for token in ("network", "timed out", "urlopen", "connection")):
         return "network"
+    if any(token in lowered for token in PLAYER_TOKENS):
+        return "player"
     return "extractor"
+
+
+# Strings mpv itself produces. They mean the file or the output device failed,
+# not that YouTube changed, so they never count toward the yt-dlp auto-update.
+PLAYER_TOKENS = (
+    "loading failed",
+    "no audio or video data played",
+    "playback did not start",
+    "failed to open",
+    "can not open",
+    "failed to recognize file format",
+    "failed to initialize",
+    "error opening",
+    "audio output",
+    "video output",
+    "[vo/",
+    "[ao/",
+    "vo:",
+    "ao:",
+    "mpv offline",
+)
+
+
+ProgressHook = Callable[[float], None]
+_PROGRESS_RE = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
+DEFAULT_FORMAT = "bv*[height<=?720][vcodec^=avc1]+ba[acodec^=mp4a]/18/b"
+
+
+def parse_progress(line: str) -> float | None:
+    """Percentage from a `--newline --progress` line, or None for other lines."""
+    match = _PROGRESS_RE.search(line)
+    if not match:
+        return None
+    return max(0.0, min(100.0, float(match.group(1))))
 
 
 class YtDlp:
@@ -58,15 +96,66 @@ class YtDlp:
         self.extra_args = list(extra_args or [])
 
     async def run(self, args: list[str]) -> tuple[int, str, str]:
+        # Options first, then the request; yt-dlp reads them in any order but
+        # this keeps the URL last in logs and in `ps`.
         proc = await asyncio.create_subprocess_exec(
             *self.command,
-            *args,
             *self.extra_args,
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        return proc.returncode or 0, stdout.decode(), stderr.decode()
+        return proc.returncode or 0, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+    async def run_streaming(
+        self,
+        args: list[str],
+        *,
+        on_line: Callable[[str], None] | None = None,
+        timeout: float | None = None,
+    ) -> tuple[int, str, str]:
+        """Like run(), but hands each stdout line to on_line as it arrives."""
+        proc = await asyncio.create_subprocess_exec(
+            *self.command,
+            *self.extra_args,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_pipe = getattr(proc, "stdout", None)
+        stderr_pipe = getattr(proc, "stderr", None)
+        if stdout_pipe is None or stderr_pipe is None:
+            stdout, stderr = await proc.communicate()
+            return proc.returncode or 0, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+        lines: list[str] = []
+
+        async def pump() -> None:
+            while True:
+                raw = await stdout_pipe.readline()
+                if not raw:
+                    return
+                line = raw.decode(errors="replace").rstrip("\r\n")
+                lines.append(line)
+                if on_line is not None:
+                    on_line(line)
+
+        async def finish() -> bytes:
+            _ignored, err = await asyncio.gather(pump(), stderr_pipe.read())
+            await proc.wait()
+            return bytes(err)
+
+        try:
+            stderr = await asyncio.wait_for(finish(), timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.wait()
+            seconds = int(timeout or 0)
+            return 124, "\n".join(lines), f"download timed out after {seconds} s"
+        return proc.returncode or 0, "\n".join(lines), stderr.decode(errors="replace")
 
     async def version(self) -> str:
         code, out, err = await self.run(["--version"])
@@ -157,28 +246,33 @@ class YtDlp:
         fmt: str,
         directory: str,
         *,
-        playlist: bool,
-        limit: int | None,
+        playlist: bool = False,
+        limit: int | None = None,
+        progress: ProgressHook | None = None,
+        timeout: float | None = None,
+        rate_limit: str | None = None,
     ) -> tuple[list[str], str]:
         """Save a real media file and return its path.
 
-        mpv cannot play the separate streams YouTube returns. yt-dlp downloads
-        them, merges picture and sound, and mpv then opens that file.
+        mpv cannot open the separate, client-bound streams YouTube serves.
+        yt-dlp downloads them, merges picture and sound into one MKV, and mpv
+        plays that file. `progress` receives 0-100 while the download runs.
         """
-        folder = Path(directory)
+        folder = Path(directory).expanduser()
         folder.mkdir(parents=True, exist_ok=True)
-        paths, err = await self._download_once(url, fmt, folder, playlist=playlist, limit=limit)
+        options: dict[str, Any] = {
+            "playlist": playlist,
+            "limit": limit,
+            "progress": progress,
+            "timeout": timeout,
+            "rate_limit": rate_limit,
+        }
+        paths, err = await self._download_once(url, fmt, folder, **options)
         if paths:
             return paths, ""
-        if _download_should_retry(err):
-            paths, retry_err = await self._download_once(
-                url,
-                "18/b",
-                folder,
-                playlist=playlist,
-                limit=limit,
-                extractor_args="youtube:player_client=web_embedded",
-            )
+        if fmt != "18/b" and _download_should_retry(err):
+            log.info("download retry with format 18 reason=%s", err.strip()[:160])
+            paths, retry_err = await self._download_once(url, "18/b", folder, **options)
             if paths:
                 return paths, ""
             return [], (retry_err or err).strip()
@@ -192,7 +286,9 @@ class YtDlp:
         *,
         playlist: bool,
         limit: int | None,
-        extractor_args: str | None = None,
+        progress: ProgressHook | None,
+        timeout: float | None,
+        rate_limit: str | None,
     ) -> tuple[list[str], str]:
         args = [
             "-f",
@@ -201,14 +297,15 @@ class YtDlp:
             "mkv",
             "--force-overwrites",
             "--no-warnings",
-            "--no-progress",
+            "--newline",
+            "--progress",
             "-o",
             str(folder / "%(id)s.%(ext)s"),
             "--print",
             "after_move:filepath",
         ]
-        if extractor_args:
-            args.extend(["--extractor-args", extractor_args])
+        if rate_limit:
+            args.extend(["--limit-rate", rate_limit])
         if playlist:
             args.append("--yes-playlist")
             if limit:
@@ -216,22 +313,33 @@ class YtDlp:
         else:
             args.append("--no-playlist")
         args.append(url)
-        code, out, err = await self.run(args)
+
+        def on_line(line: str) -> None:
+            percent = parse_progress(line)
+            if percent is not None and progress is not None:
+                progress(percent)
+
+        code, out, err = await self.run_streaming(args, on_line=on_line, timeout=timeout)
         paths = [line.strip() for line in out.splitlines() if line.strip() and Path(line.strip()).is_file()]
         if code != 0 or not paths:
-            return [], (err or out or "yt-dlp did not write a file").strip()
-        keep = set(paths)
-        for old in folder.iterdir():
-            if old.is_file() and str(old) not in keep:
-                try:
-                    old.unlink()
-                except OSError:
-                    pass
+            detail = (err or _last_error_line(out) or "yt-dlp did not write a file").strip()
+            return [], detail
+        if progress is not None:
+            progress(100.0)
         return paths, ""
+
+
+def _last_error_line(out: str) -> str:
+    for line in reversed(out.splitlines()):
+        if line.startswith("ERROR"):
+            return line
+    return ""
 
 
 def _download_should_retry(err: str) -> bool:
     lowered = err.lower()
+    if "timed out after" in lowered:
+        return False
     return any(
         token in lowered
         for token in ("403", "forbidden", "format", "sabr", "nsig", "signature", "only images")

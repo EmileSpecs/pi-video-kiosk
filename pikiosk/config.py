@@ -115,10 +115,10 @@ class MqttConfig(BaseModel):
 
 class PlaybackConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    ytdl_format: str = (
-        "bestvideo[height<=?720][vcodec^=avc1][fps<=?30]+bestaudio[acodec^=mp4a]/"
-        "bestvideo[height<=?720][fps<=?30]+bestaudio/best[height<=?720]/best"
-    )
+    # H.264 up to 720p merged with AAC; format 18 (360p muxed) and then
+    # anything as fallbacks. yt-dlp downloads this, mpv plays the file.
+    ytdl_format: str = "bv*[height<=?720][vcodec^=avc1]+ba[acodec^=mp4a]/18/b"
+    download_timeout_s: int = 300
     default_volume: int = 40
     max_volume: int = 80
     start_muted: bool = False
@@ -146,6 +146,13 @@ class PlaybackConfig(BaseModel):
     def _volume(cls, value: int) -> int:
         if not 0 <= value <= 100:
             raise ValueError("volume must be 0-100")
+        return value
+
+    @field_validator("download_timeout_s")
+    @classmethod
+    def _timeout(cls, value: int) -> int:
+        if not 30 <= value <= 3600:
+            raise ValueError("download_timeout_s must be 30-3600")
         return value
 
     @model_validator(mode="after")

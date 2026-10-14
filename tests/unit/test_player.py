@@ -184,8 +184,11 @@ class _Files:
         self.paths = paths
         self.err = err
 
-    async def download_media(self, url: str, fmt: str, directory: str, *, playlist: bool, limit: int | None):
-        del url, fmt, directory, playlist, limit
+    async def download_media(self, url: str, fmt: str, directory: str, **kwargs):
+        del url, fmt, directory
+        progress = kwargs.get("progress")
+        if progress and self.paths:
+            progress(50.0)
         return self.paths, self.err
 
 

@@ -269,7 +269,8 @@ def build_component_payloads(
                 "{{ {'media_id': value_json.media_id, 'source': value_json.source, "
                 "'playlist_index': value_json.playlist_index, "
                 "'playlist_count': value_json.playlist_count, "
-                "'offline': value_json.offline, 'last_error': value_json.last_error} | tojson }}"
+                "'offline': value_json.offline, 'last_error': value_json.last_error, "
+                "'download_progress': value_json.download_progress} | tojson }}"
             ),
             "icon": "mdi:television-play",
         },

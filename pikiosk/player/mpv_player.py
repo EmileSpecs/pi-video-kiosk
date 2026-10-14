@@ -10,6 +10,7 @@ from pikiosk.player.base import PlayerListener
 from pikiosk.player.mpv_ipc import MpvClient, MpvError
 
 log = logging.getLogger("pikiosk.player")
+OBSERVED = ("media-title", "duration", "time-pos", "pause", "playlist-pos", "playlist-count", "path")
 
 
 class MpvPlayer:
@@ -115,7 +116,10 @@ class MpvPlayer:
         await self.set_loop_file(self.loop_file)
         if self.audio_device and self.audio_device != "auto":
             await self.set_property("audio-device", self.audio_device)
-        await self.set_property("ytdl-format", self.ytdl_format)
+        # Without these mpv never pushes property-change events, so Home
+        # Assistant would show title, duration and position as unknown.
+        for index, name in enumerate(OBSERVED, start=1):
+            await self._cmd("observe_property", index, name)
 
     async def _request_restart(self) -> None:
         loop = asyncio.get_running_loop()
@@ -150,15 +154,13 @@ class MpvPlayer:
         mode = "append" if append else "replace"
         del headers
         if url and not path:
+            # Only reached without a downloader (--simulate); mpv's own hook
+            # takes the page URL and whatever yt-dlp it finds on PATH.
             await self.set_property("ytdl", "yes")
-        if playlist:
-            items = f"1-{max_items}" if max_items else "1-50"
-            # Setting this property replaces mpv.conf, so keep the JS runtime.
-            raw = (
-                f"yes-playlist=,playlist-items={items},"
-                "js-runtimes=deno:/usr/local/bin/deno,remote-components=ejs:github"
-            )
-            await self.set_property("ytdl-raw-options", raw)
+            await self.set_property("ytdl-format", self.ytdl_format)
+            if playlist:
+                items = f"1-{max_items}" if max_items else "1-50"
+                await self.set_property("ytdl-raw-options", f"yes-playlist=,playlist-items={items}")
         if start:
             await self._cmd("loadfile", target, mode, -1, f"start={start}")
         else:

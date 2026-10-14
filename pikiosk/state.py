@@ -53,6 +53,7 @@ class KioskState:
     selected: str | None = None
     last_error: str | None = None
     error_detail: str | None = None
+    download_progress: int | None = None
     mpv_connected: bool = False
     mpv_error: str | None = None
     mqtt_connected: bool = False

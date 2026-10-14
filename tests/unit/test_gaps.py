@@ -629,9 +629,12 @@ async def test_cache_and_ytdlp(
     async def fake_exec(*args: str, **_kwargs: Any) -> Proc:
         code, out, err = replies.pop(0)
         if code == 0 and "-o" in args:
-            target = Path(args[args.index("-o") + 1])
+            template = Path(args[args.index("-o") + 1])
+            video_id = args[-1].split("v=")[-1][:11]
+            target = template.parent / f"{video_id}.mkv"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"1234567890")
+            out = str(target).encode()
         return Proc(code, out, err)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
@@ -679,8 +682,11 @@ async def test_cache_and_ytdlp(
             {"type": "video"},
         ]
     )
-    assert manager.get("aaaaaaaaaaa")
-    manager.mark_played("aaaaaaaaaaa")
+    # Direct video items are fetched before playlist entries; the playlist
+    # entry then hits the "network down" reply.
+    assert manager.get("WRVsOCh907o")
+    assert manager.get("aaaaaaaaaaa") is None
+    manager.mark_played("WRVsOCh907o")
     manager.mark_played("missing")
     await ytdlp.version()
     assert await ytdlp.simulate("aaaaaaaaaaa") is False

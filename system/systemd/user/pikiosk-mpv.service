@@ -1,6 +1,9 @@
 [Unit]
 Description=Pi Video Kiosk mpv player
+# Only run inside the Wayland session: labwc starts pikiosk-session.target
+# after it has imported WAYLAND_DISPLAY into the user manager.
 PartOf=pikiosk-session.target
+After=pikiosk-session.target
 
 [Service]
 Type=simple
@@ -13,4 +16,4 @@ RestartSec=2
 SyslogIdentifier=pikiosk-mpv
 
 [Install]
-WantedBy=default.target
+WantedBy=pikiosk-session.target

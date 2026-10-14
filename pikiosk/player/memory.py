@@ -63,7 +63,7 @@ class MemoryPlayer:
             self.fail_next = False
             if self.failures_left:
                 self.failures_left -= 1
-            self.emit({"event": "end-file", "reason": "error", "file_error": "extractor failed"})
+            self.emit({"event": "end-file", "reason": "error", "file_error": "loading failed"})
             return
         self.playlist_count = 3 if playlist else 1
         self.playlist_index = 0
@@ -123,5 +123,5 @@ class MemoryPlayer:
     async def simulate_eof(self) -> None:
         self.emit({"event": "end-file", "reason": "eof"})
 
-    async def simulate_error(self, message: str = "extractor failed") -> None:
+    async def simulate_error(self, message: str = "loading failed") -> None:
         self.emit({"event": "end-file", "reason": "error", "file_error": message})

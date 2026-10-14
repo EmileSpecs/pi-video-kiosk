@@ -27,7 +27,9 @@ mqtt:
   image_entity: false
 
 playback:
-  ytdl_format: "bestvideo[height<=?720][vcodec^=avc1][fps<=?30]+bestaudio[acodec^=mp4a]/bestvideo[height<=?720][fps<=?30]+bestaudio/best[height<=?720]/best"
+  # yt-dlp downloads this format and merges it to MKV; mpv plays the file.
+  ytdl_format: "bv*[height<=?720][vcodec^=avc1]+ba[acodec^=mp4a]/18/b"
+  download_timeout_s: 300
   default_volume: 40
   max_volume: 80
   start_muted: false

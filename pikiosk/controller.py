@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -38,6 +39,7 @@ class Controller:
         store: StateStore,
         catalog: Catalog,
         cache_lookup: Callable[[str], str | None] | None = None,
+        cache: Any | None = None,
         on_restart: Hook | None = None,
         on_update_ytdlp: Hook | None = None,
         ytdlp: YtDlp | None = None,
@@ -52,7 +54,8 @@ class Controller:
         self.bus = bus
         self.store = store
         self.catalog = catalog
-        self.cache_lookup = cache_lookup
+        self.cache = cache
+        self.cache_lookup = cache_lookup or (cache.get if cache is not None else None)
         self.on_restart = on_restart
         self.on_update_ytdlp = on_update_ytdlp
         self.ytdlp = ytdlp
@@ -72,6 +75,9 @@ class Controller:
         self._mpv_log = ""
         self._mpv_log_lines: deque[str] = deque(maxlen=10)
         self._load_generation = 0
+        self._last_playable: Playable | None = None
+        self._append_task: asyncio.Task[None] | None = None
+        self._managed_queue = False
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
@@ -206,7 +212,8 @@ class Controller:
         }:
             await self.player.stop()
             await self.drain()
-        self._set(replace(self.state, player=PlayerState.IDLE, now=None, last_error=None))
+        self._load_generation += 1  # abandons a download or playlist append in flight
+        self._set(replace(self.state, player=PlayerState.IDLE, now=None, last_error=None, download_progress=None))
         self.screen.note_activity()
 
     async def cmd_next(self) -> None:
@@ -410,12 +417,13 @@ class Controller:
             await self.screen.turn_on(self.state.brightness)
         self.screen.note_activity()
 
-    async def _load(self, playable: Playable) -> None:
+    async def _load(self, playable: Playable, *, retrying: bool = False) -> None:
+        """One playback path: local file, or cache hit, or download then play."""
         if not self.player.connected:
             self._queue_command("play_media", {"ref": playable.url or playable.catalog_name or ""})
             return
         local = self._cached(playable.video_id) if playable.video_id else None
-        if self.config.playback.prefer_offline and local:
+        if local and not playable.path:
             playable = replace(playable, path=local)
         selected = self.state.selected
         if playable.catalog_name:
@@ -438,8 +446,11 @@ class Controller:
         )
         if playable.source == "file":
             now = replace(now, local_file=playable.path)
-        self._retries = 0
+        if not retrying:
+            self._retries = 0
+        self._last_playable = playable
         self._load_generation += 1
+        self._managed_queue = False
         generation = self._load_generation
         self._set(
             replace(
@@ -449,53 +460,193 @@ class Controller:
                 selected=selected,
                 last_error=None,
                 error_detail=None,
+                download_progress=None,
             )
         )
-        target_is_playlist = bool(playable.playlist_id) and not playable.path
-        extra_paths: list[str] = []
-        download = getattr(self.ytdlp, "download_media", None)
-        if download is not None and playable.url and not playable.path:
-            folder = Path(self.config.offline.directory).expanduser().parent / "playback"
-            paths, err = await download(
-                playable.url,
+        # One timer from the tap covers the download and the open.
+        self.clock.call_later(
+            self.config.playback.download_timeout_s,
+            lambda: self._load_timed_out(generation),
+        )
+        if playable.path:
+            await self._start_file(playable.path, playable.start, generation)
+            return
+        if self._downloader() is None:
+            await self._stream_url(playable, generation)
+            return
+        ids = await self._queue_ids(playable)
+        if self._stale(generation):
+            return
+        if ids is None:
+            await self._stream_url(playable, generation)
+            return
+        if not ids:
+            await self._on_error("playlist is empty or unavailable")
+            return
+        if len(ids) > 1 or playable.playlist_id:
+            self._managed_queue = len(ids) > 1
+            self._set(
+                replace(
+                    self.state,
+                    now=replace(
+                        now,
+                        video_id=ids[0],
+                        playlist_count=len(ids),
+                        thumbnail_url=now.thumbnail_url or thumbnail_url(ids[0]),
+                    ),
+                )
+            )
+        path, err = await self._fetch_media(ids[0], playable.url if len(ids) == 1 else None, generation)
+        if self._stale(generation):
+            return
+        if not path:
+            await self._on_error(err or "download failed")
+            return
+        await self._start_file(path, playable.start, generation, playlist_items=len(ids))
+        if len(ids) > 1 and not self._stale_generation(generation):
+            self._append_task = asyncio.get_running_loop().create_task(self._append_rest(ids[1:], generation))
+
+    def _downloader(self) -> Any:
+        if self.cache is not None:
+            return self.cache
+        if getattr(self.ytdlp, "download_media", None) is not None:
+            return self.ytdlp
+        return None
+
+    def _stale_generation(self, generation: int) -> bool:
+        return generation != self._load_generation
+
+    def _stale(self, generation: int) -> bool:
+        return generation != self._load_generation or self.state.player != PlayerState.LOADING
+
+    async def _queue_ids(self, playable: Playable) -> list[str] | None:
+        """Video ids to play in order; None when the player must take the URL itself."""
+        if not playable.playlist_id:
+            return [playable.video_id] if playable.video_id else None
+        expand = getattr(self.ytdlp, "flat_playlist", None)
+        if expand is None:
+            return None
+        limit = playable.max_items or 50
+        try:
+            entries = await expand(playable.playlist_id, limit)
+        except Exception as exc:
+            log.warning("playlist expand failed id=%s error=%s", playable.playlist_id, exc)
+            return []
+        ids: list[str] = []
+        for entry in entries:
+            video_id = str(entry.get("id") or "")
+            if video_id and video_id not in ids:
+                ids.append(video_id)
+        if playable.shuffle:
+            random.shuffle(ids)
+        return ids[:limit]
+
+    async def _fetch_media(self, video_id: str, url: str | None, generation: int) -> tuple[str | None, str]:
+        last = {"percent": -1}
+
+        def on_progress(percent: float) -> None:
+            value = int(percent)
+            if value == last["percent"] or (value - last["percent"] < 2 and value < 100):
+                return
+            last["percent"] = value
+            if generation == self._load_generation and self.state.player == PlayerState.LOADING:
+                self._set(replace(self.state, download_progress=value))
+
+        target = url or f"https://www.youtube.com/watch?v={video_id}"
+        if self.cache is not None:
+            path, err = await self.cache.ensure(video_id, target, progress=on_progress)
+            return (str(path) if path else None), str(err or "")
+        folder = Path(self.config.offline.directory).expanduser()
+        try:
+            paths, err = await self.ytdlp.download_media(  # type: ignore[union-attr]
+                target,
                 self.config.playback.ytdl_format,
                 str(folder),
-                playlist=target_is_playlist,
-                limit=playable.max_items,
+                playlist=False,
+                limit=None,
+                progress=on_progress,
+                timeout=self.config.playback.download_timeout_s,
             )
-            if not paths:
-                await self._on_error(err or "yt-dlp failed")
-                return
-            playable = replace(playable, path=paths[0])
-            extra_paths = paths[1:]
-            target_is_playlist = False
-        await self.player.load(
-            None if playable.path else playable.url,
-            playable.path,
-            start=playable.start,
-            playlist=target_is_playlist,
-            max_items=playable.max_items,
-            shuffle=playable.shuffle and not extra_paths,
-        )
-        for index, path in enumerate(extra_paths):
-            await self.player.load(
-                None,
-                path,
-                append=True,
-                shuffle=playable.shuffle and index == len(extra_paths) - 1,
-            )
+        except Exception as exc:
+            log.warning("download crashed id=%s error=%s", video_id, exc)
+            return None, str(exc)
+        if not paths:
+            return None, err
+        return paths[0], ""
+
+    async def _start_file(
+        self,
+        path: str,
+        start: float | None,
+        generation: int,
+        *,
+        playlist_items: int = 1,
+    ) -> None:
+        current = self.state.now
+        if current is not None:
+            self._set(replace(self.state, now=replace(current, local_file=path), download_progress=None))
+        await self.player.load(None, path, start=start)
         if self.state.after_video == AfterVideo.LOOP:
-            playing_playlist = target_is_playlist or bool(extra_paths)
-            await self.player.set_loop_file(not playing_playlist)
-            await self.player.set_loop_playlist(playing_playlist)
+            await self.player.set_loop_file(playlist_items <= 1)
+            await self.player.set_loop_playlist(playlist_items > 1)
         await self.drain()
-        if self.state.player == PlayerState.LOADING:
-            self.clock.call_later(60, lambda: self._load_timed_out(generation))
+        if self.state.player == PlayerState.LOADING and generation == self._load_generation:
+            self.clock.call_later(60, lambda: self._open_timed_out(generation))
+
+    async def _stream_url(self, playable: Playable, generation: int) -> None:
+        """No downloader available (tests, --simulate): hand mpv the page URL."""
+        is_playlist = bool(playable.playlist_id)
+        await self.player.load(
+            playable.url,
+            None,
+            start=playable.start,
+            playlist=is_playlist,
+            max_items=playable.max_items,
+            shuffle=playable.shuffle,
+        )
+        if self.state.after_video == AfterVideo.LOOP:
+            await self.player.set_loop_file(not is_playlist)
+            await self.player.set_loop_playlist(is_playlist)
+        await self.drain()
+        if self.state.player == PlayerState.LOADING and generation == self._load_generation:
+            self.clock.call_later(60, lambda: self._open_timed_out(generation))
+
+    async def _append_rest(self, ids: list[str], generation: int) -> None:
+        """Download the remaining playlist items and append them to mpv's queue."""
+        for video_id in ids:
+            if self._stale_generation(generation):
+                return
+            path, err = await self._fetch_media(video_id, None, generation)
+            if self._stale_generation(generation):
+                return
+            if not path:
+                log.info("playlist item skipped id=%s reason=%s", video_id, err.strip()[:120])
+                current = self.state.now
+                if current and current.playlist_count:
+                    self._set(replace(self.state, now=replace(current, playlist_count=current.playlist_count - 1)))
+                continue
+            try:
+                await self.player.load(None, path, append=True)
+            except Exception as exc:
+                log.warning("append failed id=%s error=%s", video_id, exc)
+                return
+
+    async def _open_timed_out(self, generation: int) -> None:
+        if generation != self._load_generation or self.state.player != PlayerState.LOADING:
+            return
+        if self.state.download_progress is not None and self.state.download_progress < 100:
+            return  # still downloading; the download timer owns this case
+        await self._on_error(self._mpv_log or "playback did not start")
 
     async def _load_timed_out(self, generation: int) -> None:
         if generation != self._load_generation or self.state.player != PlayerState.LOADING:
             return
-        await self._on_error(self._mpv_log or "playback did not start")
+        progress = self.state.download_progress
+        if progress is not None and progress < 100:
+            detail = f"download timed out at {progress}%"
+        else:
+            detail = self._mpv_log or "playback did not start"
+        await self._on_error(detail)
 
     def _cached(self, video_id: str | None) -> str | None:
         if not video_id or self.cache_lookup is None:
@@ -549,8 +700,11 @@ class Controller:
             await self._on_property(str(event.get("name")), event.get("data"))
             return
         if name == "file-loaded":
-            self._set(replace(self.state, player=PlayerState.PLAYING, mpv_connected=True))
-            self.bus.publish(Event("video_started", {"title": self.state.now.title if self.state.now else ""}))
+            self._set(replace(self.state, player=PlayerState.PLAYING, mpv_connected=True, download_progress=None))
+            current = self.state.now
+            if current and current.video_id and self.cache is not None:
+                self.cache.mark_played(current.video_id)
+            self.bus.publish(Event("video_started", {"title": current.title if current else ""}))
             return
         if name == "end-file":
             await self._on_end(str(event.get("reason") or ""), str(event.get("file_error") or ""))
@@ -567,7 +721,15 @@ class Controller:
         if current is None:
             return
         if name == "media-title" and isinstance(data, str) and data:
+            # A cached MKV reports its file name as the title; keep the catalog name.
+            if current.local_file and Path(data).name == Path(current.local_file).name:
+                return
             self._set(replace(self.state, now=replace(current, title=data)))
+        elif name == "pause" and isinstance(data, bool):
+            if data and self.state.player == PlayerState.PLAYING:
+                self._set(replace(self.state, player=PlayerState.PAUSED))
+            elif not data and self.state.player == PlayerState.PAUSED:
+                self._set(replace(self.state, player=PlayerState.PLAYING))
         elif name == "duration" and isinstance(data, (int, float)):
             self._set(replace(self.state, now=replace(current, duration=float(data))))
         elif name == "time-pos" and isinstance(data, (int, float)):
@@ -577,7 +739,10 @@ class Controller:
         elif name == "playlist-pos" and isinstance(data, int):
             self._set(replace(self.state, now=replace(current, playlist_index=data)))
         elif name == "playlist-count" and isinstance(data, int):
-            self._set(replace(self.state, now=replace(current, playlist_count=data)))
+            # While the controller feeds mpv one downloaded file at a time, mpv's
+            # count only says how many have arrived so far; ours is the total.
+            if not self._managed_queue:
+                self._set(replace(self.state, now=replace(current, playlist_count=data)))
         elif name == "path" and isinstance(data, str) and "v=" in data:
             video_id = data.split("v=")[-1].split("&")[0]
             if len(video_id) == 11:
@@ -632,9 +797,11 @@ class Controller:
                 player=PlayerState.ERROR,
                 last_error=kind,
                 error_detail=text[:400] or None,
+                download_progress=None,
             )
         )
         self.bus.publish(Event("error", {"error": kind, "detail": detail}))
+        log.warning("playback error kind=%s detail=%s", kind, text[:200])
         current = self.state.now
         cached = self._cached(current.video_id if current else None)
         if cached and current and current.local_file != cached:
@@ -647,24 +814,29 @@ class Controller:
                 self._extractor_failures = 0
                 self._last_heal = self.clock.monotonic()
                 await self.cmd_update_ytdlp()
-        if self._retries < 1 and self.ytdlp is None:
+        # A flaky network or a hiccup in mpv deserves one more go; a video that
+        # YouTube refuses does not.
+        if kind in {"network", "player"} and self._retries < 1 and current is not None:
             self._retries += 1
             self.clock.call_later(3, self._retry)
+        elif kind == "player" and current and current.video_id and current.local_file and self.cache is not None:
+            # mpv refused the cached file twice: drop it so the next tap re-downloads.
+            forget = getattr(self.cache, "forget", None)
+            if forget is not None:
+                forget(current.video_id)
         self.clock.call_later(10, self._clear_error)
 
     async def _retry(self) -> None:
         current = self.state.now
         if self.state.player != PlayerState.ERROR or current is None:
             return
-        target = current.local_file or (
-            f"https://www.youtube.com/watch?v={current.video_id}" if current.video_id else None
-        )
-        if target is None:
+        if current.local_file and Path(current.local_file).exists():
+            self._set(replace(self.state, player=PlayerState.LOADING, last_error=None, error_detail=None))
+            await self.player.load(None, current.local_file)
+            await self.drain()
             return
-        path = target if current.local_file else None
-        url = None if path else target
-        await self.player.load(url, path)
-        await self.drain()
+        if self._last_playable is not None:
+            await self._load(self._last_playable, retrying=True)
 
     async def _clear_error(self) -> None:
         if self.state.player == PlayerState.ERROR:

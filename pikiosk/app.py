@@ -11,6 +11,7 @@ from typing import Any
 from aiohttp import web
 
 from pikiosk import __version__
+from pikiosk.cache.cache_manager import CacheManager
 from pikiosk.cache.ytdlp import YtDlp, ytdlp_command, ytdlp_runtime_args
 from pikiosk.catalog import Catalog
 from pikiosk.clock import SystemClock
@@ -46,6 +47,15 @@ def mpv_socket_path() -> str:
     return str(Path(runtime) / "pi-kiosk" / "mpv.sock")
 
 
+def ytdlp_args(config: KioskConfig) -> list[str]:
+    """Runtime flags (JS runtime, remote components) plus the operator's own."""
+    args = ytdlp_runtime_args()
+    if config.ytdlp.cookies_file:
+        args.extend(["--cookies", str(Path(config.ytdlp.cookies_file).expanduser())])
+    args.extend(config.ytdlp.extra_args)
+    return args
+
+
 def make_catalog(config: KioskConfig) -> Catalog:
     return Catalog(
         config.catalog_items(),
@@ -78,6 +88,8 @@ class App:
         self.backlight = Backlight(discover_backlight(root, config.screen.backlight_device))
         output = RecordingOutput() if simulate else WlrRandr()
         self.screen = ScreenService(config, self.backlight, output, self.clock)
+        self.ytdlp: YtDlp | None = None
+        self.cache: CacheManager | None = None
         if simulate:
             self.player: MemoryPlayer | MpvPlayer = MemoryPlayer()
             self.transport: MemoryTransport | AioTransport = MemoryTransport()
@@ -87,8 +99,11 @@ class App:
                 socket_path,
                 ytdl_format=config.playback.ytdl_format,
                 audio_device=config.playback.audio_device,
+                on_restart=self._restart_mpv,
             )
             self.transport = AioTransport(config)
+            self.ytdlp = YtDlp(ytdlp_command(), extra_args=ytdlp_args(config))
+            self.cache = CacheManager(config, self.ytdlp, self.clock)
         self.controller = Controller(
             config,
             player=self.player,
@@ -97,10 +112,14 @@ class App:
             bus=self.bus,
             store=self.store,
             catalog=self.catalog,
+            cache=self.cache,
             on_restart=self._restart,
             on_reload=self._reload_hook,
-            ytdlp=None if simulate else YtDlp(ytdlp_command(), extra_args=ytdlp_runtime_args()),
+            on_sync=self._sync_now,
+            ytdlp=self.ytdlp,
         )
+        self._precache_task: asyncio.Task[None] | None = None
+        self._sync_task: asyncio.Task[None] | None = None
         self.bridge = MqttBridge(config, self.controller, self.transport, self.clock, self.store)
         self.config_store = None
         if config_path and secrets_path:
@@ -127,6 +146,49 @@ class App:
         log.info("restart requested")
         self.stop()
 
+    async def _restart_mpv(self) -> None:
+        """mpv stopped answering: let systemd give us a fresh one."""
+        log.warning("restarting pikiosk-mpv.service")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "--user", "restart", "pikiosk-mpv.service"
+            )
+            await asyncio.wait_for(proc.wait(), 20)
+        except (OSError, asyncio.TimeoutError) as exc:
+            log.warning("mpv restart failed error=%s", exc)
+
+    async def _sync_now(self) -> None:
+        if self.cache is None:
+            return
+        self._start_background(force_sync=True)
+
+    def _start_background(self, *, force_sync: bool = False) -> None:
+        """(Re)start the catalog pre-cache; a force_sync also expands playlists."""
+        if self.cache is None:
+            return
+        if self._precache_task is not None and not self._precache_task.done():
+            self._precache_task.cancel()
+        items = self.config.catalog_items()
+        if force_sync:
+            self._precache_task = asyncio.create_task(self._guarded(self.cache.sync(items, force=True), "sync"))
+        else:
+            self._precache_task = asyncio.create_task(self._guarded(self.cache.precache(items), "pre-cache"))
+
+    async def _guarded(self, work: Any, label: str) -> None:
+        try:
+            await work
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("%s failed", label, exc_info=True)
+
+    async def _sync_loop(self) -> None:
+        while True:
+            hours = max(1.0, float(self.config.offline.sync_interval_h))
+            await asyncio.sleep(hours * 3600)
+            if self.cache is not None and self.config.offline.enabled:
+                await self._guarded(self.cache.sync(self.config.catalog_items()), "sync")
+
     async def _reload_hook(self, _config: KioskConfig) -> None:
         if self.config_store:
             await self.reload_saved()
@@ -138,7 +200,14 @@ class App:
         catalog = make_catalog(config)
         await self.controller.apply_config(config, catalog)
         reconnect = self.bridge.update_config(config)
+        catalog_changed = config.catalog != self.config.catalog
         self.config = config
+        if self.cache is not None:
+            self.cache.update_config(config)
+            if self.ytdlp is not None:
+                self.ytdlp.extra_args = ytdlp_args(config)
+            if catalog_changed:
+                self._start_background()
         # A broker change reconnects on its own and publishes discovery after
         # the new session is up. Republishing on the socket that is about to
         # close makes the publish wait until it times out.
@@ -163,9 +232,14 @@ class App:
         await self._serve()
         heartbeat = asyncio.create_task(self._heartbeat())
         telemetry = asyncio.create_task(self._telemetry_loop())
+        self._start_background()
+        self._sync_task = asyncio.create_task(self._sync_loop())
         await self._stop.wait()
         heartbeat.cancel()
         telemetry.cancel()
+        for task in (self._precache_task, self._sync_task):
+            if task is not None:
+                task.cancel()
         self.notifier.stopping()
         self.store.save(self.controller.state)
         await self.bridge.stop()

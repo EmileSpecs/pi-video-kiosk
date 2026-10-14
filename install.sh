@@ -215,8 +215,8 @@ PY
 from pathlib import Path
 path = Path("/etc/pi-kiosk/config.yaml")
 text = path.read_text(encoding="utf-8")
-old = "bestvideo[height<=?720]"
-new = "bestvideo[height<=?480]"
+old = "[height<=?720]"
+new = "[height<=?480]"
 path.write_text(text.replace(old, new), encoding="utf-8")
 PY
     fi
@@ -366,12 +366,17 @@ install_units() {
   run_user() {
     sudo -u "$USER_NAME" XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user "$@" || true
   }
+  # Earlier releases started mpv from default.target, before the Wayland
+  # session existed. It is wanted by pikiosk-session.target now.
+  rm -f "$dest/default.target.wants/pikiosk-mpv.service"
   run_user daemon-reload
   run_user enable pikioskd.service pikiosk-ytdlp-update.timer pikiosk-update.timer
   run_user restart pikioskd.service
   if [[ "$NO_UI" -eq 0 ]]; then
-    run_user enable --now pikiosk-mpv.service
-    run_user enable pikiosk-ui.service
+    run_user enable pikiosk-mpv.service pikiosk-ui.service
+    # Restarting the target restarts mpv and Chromium inside the running
+    # session; before the first login it is a no-op.
+    run_user restart pikiosk-session.target
   fi
   install -d /etc/systemd/journald.conf.d
   install -m 0644 "$PREFIX/system/journald/pikiosk.conf" /etc/systemd/journald.conf.d/pikiosk.conf

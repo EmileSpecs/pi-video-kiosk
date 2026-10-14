@@ -30,8 +30,13 @@ if "--flat-playlist" in args:
     print('{"entries":[{"id":"XqZsoesa55w"},{"id":"dQw4w9WgXcQ"}]}')
     raise SystemExit(0)
 if "-o" in args:
-    target = Path(args[args.index("-o") + 1])
+    template = Path(args[args.index("-o") + 1])
+    video_id = args[-1].split("v=")[-1][:11]
+    target = template.parent / f"{video_id}.mkv"
     target.write_bytes(b"0123456789")
+    print("[download]  50.0% of 10.00B at 1.00B/s ETA 00:05")
+    print(target)
+    raise SystemExit(0)
 print("{}")
 """,
         encoding="utf-8",
