@@ -149,8 +149,8 @@ class MpvPlayer:
         target = path or url or ""
         mode = "append" if append else "replace"
         await self._apply_headers(headers)
-        if headers:
-            await self.set_property("ytdl", "no")
+        if url and not path:
+            await self.set_property("ytdl", "yes")
         options = f"start={start}" if start else ""
         if playlist:
             items = f"1-{max_items}" if max_items else "1-50"

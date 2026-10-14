@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
-from pikiosk.cache.ytdlp import ResolvedStream, YtDlp, classify_error
+from pikiosk.cache.ytdlp import YtDlp, classify_error
 from pikiosk.catalog import Catalog, CatalogError, Playable, thumbnail_url
 from pikiosk.clock import Clock
 from pikiosk.config import KioskConfig
@@ -433,41 +433,14 @@ class Controller:
             )
         )
         target_is_playlist = bool(playable.playlist_id) and not playable.path
-        video_url = None if playable.path else playable.url
-        audio_url = None
-        headers: dict[str, str] | None = None
-        extra: list[ResolvedStream] = []
-        if self.ytdlp and playable.url and not playable.path:
-            streams, err = await self.ytdlp.resolve_streams(
-                playable.url,
-                self.config.playback.ytdl_format,
-                playlist=target_is_playlist,
-                limit=playable.max_items,
-            )
-            if not streams:
-                await self._on_error(err or "yt-dlp failed")
-                return
-            first = streams[0]
-            video_url, audio_url, headers = first.video, first.audio, first.headers or None
-            extra = streams[1:]
         await self.player.load(
-            video_url,
+            None if playable.path else playable.url,
             playable.path,
             start=playable.start,
-            playlist=target_is_playlist and not extra,
+            playlist=target_is_playlist,
             max_items=playable.max_items,
             shuffle=playable.shuffle,
-            audio_url=audio_url,
-            headers=headers,
         )
-        for item in extra:
-            await self.player.load(
-                item.video,
-                None,
-                audio_url=item.audio,
-                headers=item.headers or None,
-                append=True,
-            )
         if self.state.after_video == AfterVideo.LOOP:
             await self.player.set_loop_file(not target_is_playlist)
             await self.player.set_loop_playlist(target_is_playlist)

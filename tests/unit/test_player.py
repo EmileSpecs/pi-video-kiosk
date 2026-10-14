@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from pikiosk.cache.ytdlp import ResolvedStream, stream_pair
+from pikiosk.cache.ytdlp import stream_pair
 from pikiosk.state import PlayerState
 from tests.conftest import make_controller
 
@@ -149,28 +149,10 @@ class _Streams:
         return self.streams, self.err
 
 
-async def test_play_uses_resolved_stream(tmp_path, example_config, clock) -> None:
+async def test_play_loads_youtube_url(tmp_path, example_config, clock) -> None:
     controller, player, _screen = make_controller(tmp_path, example_config, clock)
-    controller.ytdlp = _Streams(
-        [
-            ResolvedStream(
-                "https://cdn.example/video",
-                "https://cdn.example/audio",
-                {"User-Agent": "kiosk", "Referer": "https://www.youtube.com/"},
-            )
-        ]
-    )
+    controller.ytdlp = _Streams([], "unused")
     await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
-    assert player.loads[0]["target"] == "https://cdn.example/video"
-    assert player.loads[0]["headers"]["Referer"] == "https://www.youtube.com/"
+    assert player.loads[0]["target"] == "https://www.youtube.com/watch?v=XqZsoesa55w"
+    assert "googlevideo.com" not in player.loads[0]["target"]
     assert controller.state.player == PlayerState.PLAYING
-
-
-async def test_play_shows_ytdlp_detail(tmp_path, example_config, clock) -> None:
-    controller, player, _screen = make_controller(tmp_path, example_config, clock)
-    controller.ytdlp = _Streams([], "ERROR: [youtube] n challenge solving failed")
-    await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
-    assert player.loads == []
-    assert controller.state.last_error == "extractor"
-    assert controller.state.error_detail
-    assert "n challenge" in controller.state.error_detail
