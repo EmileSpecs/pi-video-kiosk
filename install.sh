@@ -91,7 +91,7 @@ install_packages() {
     apt-get install -y chromium-browser || warn "Chromium was not installed; the touch UI will not start"
   fi
   if ! command -v deno >/dev/null 2>&1; then
-    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh || warn "Deno was not installed; some YouTube pages need it"
+    curl -fsSL https://deno.land/install.sh | CI=1 DENO_INSTALL=/usr/local sh || warn "Deno was not installed; some YouTube pages need it"
   fi
 }
 
@@ -100,10 +100,17 @@ ensure_user() {
     useradd --create-home --shell /bin/bash "$USER_NAME"
   fi
   usermod -aG video,input,render,audio "$USER_NAME" || true
+  systemctl set-default graphical.target || true
   if command -v raspi-config >/dev/null 2>&1; then
-    raspi-config nonint do_boot_behaviour B4 || true
-    raspi-config nonint do_wayland W3 || true
-    raspi-config nonint do_blanking 1 || true
+    # A stub whiptail keeps an unrecognised Trixie option from stopping on a dialog.
+    local stub
+    stub=$(mktemp -d)
+    printf '%s\n' '#!/bin/sh' 'exit 1' > "$stub/whiptail"
+    chmod +x "$stub/whiptail"
+    PATH="$stub:$PATH" raspi-config nonint do_boot_behaviour B4 || true
+    PATH="$stub:$PATH" raspi-config nonint do_wayland W3 || true
+    PATH="$stub:$PATH" raspi-config nonint do_blanking 1 || true
+    rm -rf "$stub"
   fi
   loginctl enable-linger "$USER_NAME"
 }
