@@ -9,17 +9,17 @@
     <action name="ToggleFullscreen"/>
   </windowRule>
 </windowRules>
-<touch deviceName="" mapToOutput="DSI-1"/>
+<touch mapToOutput="DSI-1"/>
 <keyboard>
-  <keybind key="A-F4"><action name="None"/></keybind>
-  <keybind key="A-F11"><action name="None"/></keybind>
-  <keybind key="W-Return"><action name="None"/></keybind>
-  <keybind key="W-e"><action name="None"/></keybind>
-  <keybind key="C-A-t"><action name="None"/></keybind>
+  <keybind key="A-F4"/>
+  <keybind key="A-F11"/>
+  <keybind key="W-Return"/>
+  <keybind key="W-e"/>
+  <keybind key="C-A-t"/>
 </keyboard>
 <mouse>
   <context name="Root">
-    <mousebind button="Right" action="Press"><action name="None"/></mousebind>
+    <mousebind button="Right" action="Press"/>
   </context>
 </mouse>
 <!-- pikiosk-end -->

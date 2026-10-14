@@ -143,12 +143,13 @@ class MpvPlayer:
         options = f"start={start}" if start else ""
         if playlist:
             items = f"1-{max_items}" if max_items else "1-50"
-            await self.set_property(
-                "ytdl-raw-options",
-                f"yes-playlist=,playlist-items={items}",
-            )
+            raw = f"yes-playlist=,playlist-items={items}"
         else:
-            await self.set_property("ytdl-raw-options", "no-playlist=")
+            raw = "no-playlist="
+        # YouTube needs a JS runtime and the EJS solver. Setting this property
+        # replaces the whole list from mpv.conf, so keep the solver options here.
+        raw += ",js-runtimes=deno:/usr/local/bin/deno,remote-components=ejs:github"
+        await self.set_property("ytdl-raw-options", raw)
         if options:
             await self._cmd("loadfile", target, "replace", -1, options)
         else:

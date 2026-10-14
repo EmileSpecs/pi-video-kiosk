@@ -298,31 +298,23 @@ install_mpv_and_labwc() {
   install -m 0755 -o "$USER_NAME" -g "$USER_NAME" "$PREFIX/system/labwc/autostart" "$home/.config/labwc/autostart"
   install -m 0644 -o "$USER_NAME" -g "$USER_NAME" "$PREFIX/system/labwc/environment" "$home/.config/labwc/environment"
   rc="$home/.config/labwc/rc.xml"
-  fragment=$(cat "$PREFIX/system/labwc/rc.xml.fragment")
   if [[ -f "$rc" ]]; then
     cp "$rc" "$rc.bak"
-    if grep -q "pikiosk-start" "$rc"; then
-      "$PREFIX/venv/bin/python" - "$rc" "$PREFIX/system/labwc/rc.xml.fragment" <<'PY'
-import sys
-from pathlib import Path
-rc = Path(sys.argv[1])
-fragment = Path(sys.argv[2]).read_text(encoding="utf-8")
-text = rc.read_text(encoding="utf-8")
-start = text.find("<!-- pikiosk-start -->")
-end = text.find("<!-- pikiosk-end -->")
-if start != -1 and end != -1:
-    text = text[:start] + fragment + text[end + len("<!-- pikiosk-end -->"):]
-else:
-    text = text.replace("</labwc_config>", fragment + "\n</labwc_config>")
-rc.write_text(text, encoding="utf-8")
-PY
-    else
-      printf '\n%s\n' "$fragment" >> "$rc"
-    fi
-  else
-    printf '<labwc_config>\n%s\n</labwc_config>\n' "$fragment" > "$rc"
   fi
+  # A desktop rc.xml already ends with </labwc_config>. Appending the fragment
+  # after that makes the file invalid, and labwc then ignores every rule.
+  {
+    printf '%s\n' '<labwc_config>'
+    cat "$PREFIX/system/labwc/rc.xml.fragment"
+    printf '%s\n' '</labwc_config>'
+  } > "$rc"
   chown "$USER_NAME:$USER_NAME" "$rc"
+  install -d -o "$USER_NAME" -g "$USER_NAME" "$home/.config/yt-dlp"
+  cat > "$home/.config/yt-dlp/config" << 'EOF'
+--js-runtimes deno:/usr/local/bin/deno
+--remote-components ejs:github
+EOF
+  chown "$USER_NAME:$USER_NAME" "$home/.config/yt-dlp/config"
   systemctl disable --now squeekboard.service >/dev/null 2>&1 || true
 }
 
