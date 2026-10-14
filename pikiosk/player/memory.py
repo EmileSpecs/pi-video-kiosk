@@ -45,6 +45,7 @@ class MemoryPlayer:
         shuffle: bool = False,
         audio_url: str | None = None,
         append: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
         del audio_url, append
         target = path or url or ""
@@ -55,6 +56,7 @@ class MemoryPlayer:
                 "playlist": playlist,
                 "max_items": max_items,
                 "shuffle": shuffle,
+                "headers": headers,
             }
         )
         if self.fail_next or self.failures_left:

@@ -2,8 +2,30 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from pikiosk.cache.ytdlp import ResolvedStream, stream_pair
 from pikiosk.state import PlayerState
 from tests.conftest import make_controller
+
+
+def test_stream_keeps_youtube_headers() -> None:
+    stream = stream_pair(
+        {
+            "requested_formats": [
+                {
+                    "url": "https://rr.googlevideo.com/video",
+                    "http_headers": {
+                        "User-Agent": "kiosk",
+                        "Referer": "https://www.youtube.com/",
+                    },
+                },
+                {"url": "https://rr.googlevideo.com/audio"},
+            ]
+        }
+    )
+    assert stream is not None
+    assert stream.video.endswith("/video")
+    assert stream.audio is not None and stream.audio.endswith("/audio")
+    assert stream.headers["Referer"] == "https://www.youtube.com/"
 
 
 async def test_play_media_loadfile(tmp_path, example_config, clock) -> None:
@@ -118,7 +140,7 @@ async def test_unknown_select(tmp_path, example_config, clock) -> None:
 
 
 class _Streams:
-    def __init__(self, streams: list[tuple[str, str | None]], err: str = "") -> None:
+    def __init__(self, streams: list[ResolvedStream], err: str = "") -> None:
         self.streams = streams
         self.err = err
 
@@ -129,9 +151,18 @@ class _Streams:
 
 async def test_play_uses_resolved_stream(tmp_path, example_config, clock) -> None:
     controller, player, _screen = make_controller(tmp_path, example_config, clock)
-    controller.ytdlp = _Streams([("https://cdn.example/video", "https://cdn.example/audio")])
+    controller.ytdlp = _Streams(
+        [
+            ResolvedStream(
+                "https://cdn.example/video",
+                "https://cdn.example/audio",
+                {"User-Agent": "kiosk", "Referer": "https://www.youtube.com/"},
+            )
+        ]
+    )
     await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
     assert player.loads[0]["target"] == "https://cdn.example/video"
+    assert player.loads[0]["headers"]["Referer"] == "https://www.youtube.com/"
     assert controller.state.player == PlayerState.PLAYING
 
 

@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
-from pikiosk.cache.ytdlp import YtDlp, classify_error
+from pikiosk.cache.ytdlp import ResolvedStream, YtDlp, classify_error
 from pikiosk.catalog import Catalog, CatalogError, Playable, thumbnail_url
 from pikiosk.clock import Clock
 from pikiosk.config import KioskConfig
@@ -67,6 +67,7 @@ class Controller:
         self._unlock_until = 0.0
         self._pin_failures = 0
         self._pin_locked_until = 0.0
+        self._mpv_log = ""
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
@@ -434,7 +435,8 @@ class Controller:
         target_is_playlist = bool(playable.playlist_id) and not playable.path
         video_url = None if playable.path else playable.url
         audio_url = None
-        extra: list[tuple[str, str | None]] = []
+        headers: dict[str, str] | None = None
+        extra: list[ResolvedStream] = []
         if self.ytdlp and playable.url and not playable.path:
             streams, err = await self.ytdlp.resolve_streams(
                 playable.url,
@@ -445,7 +447,8 @@ class Controller:
             if not streams:
                 await self._on_error(err or "yt-dlp failed")
                 return
-            video_url, audio_url = streams[0]
+            first = streams[0]
+            video_url, audio_url, headers = first.video, first.audio, first.headers or None
             extra = streams[1:]
         await self.player.load(
             video_url,
@@ -455,9 +458,16 @@ class Controller:
             max_items=playable.max_items,
             shuffle=playable.shuffle,
             audio_url=audio_url,
+            headers=headers,
         )
-        for extra_video, extra_audio in extra:
-            await self.player.load(extra_video, None, audio_url=extra_audio, append=True)
+        for item in extra:
+            await self.player.load(
+                item.video,
+                None,
+                audio_url=item.audio,
+                headers=item.headers or None,
+                append=True,
+            )
         if self.state.after_video == AfterVideo.LOOP:
             await self.player.set_loop_file(not target_is_playlist)
             await self.player.set_loop_playlist(target_is_playlist)
@@ -501,6 +511,11 @@ class Controller:
         if name == "pikiosk-disconnected":
             detail = event.get("error")
             await self.set_mpv_connected(False, error=str(detail) if detail else None)
+            return
+        if name == "log-message":
+            text = " ".join(str(event.get("text") or "").split())
+            if text:
+                self._mpv_log = text[:300]
             return
         if name == "property-change":
             await self._on_property(str(event.get("name")), event.get("data"))
@@ -578,6 +593,9 @@ class Controller:
             await self.screen.turn_off()
 
     async def _on_error(self, detail: str) -> None:
+        if self._mpv_log and detail.strip().lower() in {"loading failed", "playback failed"}:
+            detail = f"{detail}: {self._mpv_log}"
+        self._mpv_log = ""
         kind = classify_error(detail)
         text = " ".join(detail.split())
         self._set(

@@ -82,6 +82,10 @@ class MpvPlayer:
             self._emit({"event": "pikiosk-connected"})
             try:
                 try:
+                    await client.command("request_log_messages", "error")
+                except (OSError, MpvError):
+                    pass
+                try:
                     await self._reapply()
                 except (OSError, MpvError) as exc:
                     log.warning("mpv reapply failed error=%s", exc)
@@ -140,9 +144,13 @@ class MpvPlayer:
         shuffle: bool = False,
         audio_url: str | None = None,
         append: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
         target = path or url or ""
         mode = "append" if append else "replace"
+        await self._apply_headers(headers)
+        if headers:
+            await self.set_property("ytdl", "no")
         options = f"start={start}" if start else ""
         if playlist:
             items = f"1-{max_items}" if max_items else "1-50"
@@ -164,6 +172,16 @@ class MpvPlayer:
                 log.warning("audio-add failed error=%s", exc)
         if shuffle:
             await self._cmd("playlist-shuffle")
+
+    async def _apply_headers(self, headers: dict[str, str] | None) -> None:
+        if not headers:
+            return
+        user_agent = headers.get("User-Agent")
+        if user_agent:
+            await self.set_property("user-agent", user_agent)
+        fields = [f"{name}: {value}" for name, value in headers.items() if name != "User-Agent"]
+        if fields:
+            await self.set_property("http-header-fields", fields)
 
     async def stop(self) -> None:
         await self._cmd("stop")

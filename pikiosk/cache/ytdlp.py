@@ -7,9 +7,16 @@ import json
 import logging
 import os
 import shutil
+from dataclasses import dataclass, field
 from typing import Any
 
 log = logging.getLogger("pikiosk.ytdlp")
+
+@dataclass(frozen=True)
+class ResolvedStream:
+    video: str
+    audio: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def ytdlp_command() -> list[str]:
@@ -101,7 +108,7 @@ class YtDlp:
         *,
         playlist: bool,
         limit: int | None,
-    ) -> tuple[list[tuple[str, str | None]], str]:
+    ) -> tuple[list[ResolvedStream], str]:
         args = ["-J", "--no-warnings", "-f", fmt]
         if playlist:
             args.append("--yes-playlist")
@@ -133,7 +140,7 @@ class YtDlp:
             return [], (err or "yt-dlp did not return JSON").strip()
         entries = payload.get("entries")
         items = entries if isinstance(entries, list) else [payload]
-        streams: list[tuple[str, str | None]] = []
+        streams: list[ResolvedStream] = []
         for item in items:
             if isinstance(item, dict):
                 pair = stream_pair(item)
@@ -144,14 +151,34 @@ class YtDlp:
         return streams, ""
 
 
-def stream_pair(item: dict[str, Any]) -> tuple[str, str | None] | None:
+def stream_pair(item: dict[str, Any]) -> ResolvedStream | None:
     requested = item.get("requested_formats")
+    source = requested[0] if isinstance(requested, list) and requested and isinstance(requested[0], dict) else item
+    headers = _http_headers(source if isinstance(source, dict) else item)
+    if not headers:
+        headers = _http_headers(item)
     if isinstance(requested, list) and requested and isinstance(requested[0], dict):
         video = requested[0].get("url")
         audio = requested[1].get("url") if len(requested) > 1 and isinstance(requested[1], dict) else None
         if isinstance(video, str) and video.startswith("http"):
-            return video, audio if isinstance(audio, str) and audio.startswith("http") else None
+            return ResolvedStream(
+                video,
+                audio if isinstance(audio, str) and audio.startswith("http") else None,
+                headers,
+            )
     direct = item.get("url")
     if isinstance(direct, str) and direct.startswith("http"):
-        return direct, None
+        return ResolvedStream(direct, None, headers)
     return None
+
+
+def _http_headers(item: dict[str, Any]) -> dict[str, str]:
+    raw = item.get("http_headers")
+    if not isinstance(raw, dict):
+        return {}
+    headers: dict[str, str] = {}
+    for key in ("User-Agent", "Referer", "Cookie"):
+        value = raw.get(key)
+        if isinstance(value, str) and value:
+            headers[key] = value
+    return headers

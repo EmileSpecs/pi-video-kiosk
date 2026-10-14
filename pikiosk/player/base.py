@@ -24,6 +24,7 @@ class PlayerBackend(Protocol):
         shuffle: bool = False,
         audio_url: str | None = None,
         append: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None: ...
 
     async def stop(self) -> None: ...
