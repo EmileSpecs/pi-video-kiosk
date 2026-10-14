@@ -352,6 +352,10 @@ class Controller:
         self.catalog = catalog
         if self.state.selected and self.state.selected not in catalog.by_name:
             self._set(replace(self.state, selected=None))
+        # The grid learns about a new catalog from the next state push, so
+        # send one even when nothing in KioskState changed.
+        for listener in list(self._listeners):
+            listener(self.state)
         self.bus.publish(Event("info", {"config": "reloaded"}))
 
     async def set_mpv_connected(self, connected: bool, error: str | None = None) -> None:

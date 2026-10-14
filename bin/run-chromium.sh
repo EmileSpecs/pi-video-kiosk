@@ -35,5 +35,7 @@ exec "$bin" \
   --disable-session-crashed-bubble \
   --check-for-update-interval=31536000 \
   --autoplay-policy=no-user-gesture-required \
+  --force-dark-mode \
+  --hide-scrollbars \
   --password-store=basic \
   --user-data-dir="$dir"

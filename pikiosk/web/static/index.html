@@ -2,13 +2,58 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
   <title>Kiosk</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main id="grid"></main>
-  <section id="locked" hidden></section>
+  <main id="grid" class="grid" aria-label="Videos"></main>
+
+  <section id="empty" class="empty" hidden>
+    <div class="empty-mark" aria-hidden="true">▶</div>
+    <h1>No videos yet</h1>
+    <p>Ask a grown-up to add some on the admin page.</p>
+  </section>
+
+  <div id="banner" class="banner" hidden role="status">Reconnecting…</div>
+  <div id="toast" class="toast" hidden role="alert"></div>
+
+  <section id="locked" class="locked" hidden>
+    <div class="locked-logo" hidden>
+      <div class="locked-mark" aria-hidden="true">▶</div>
+      <div class="locked-name"></div>
+    </div>
+    <div class="locked-clock" hidden>
+      <div class="clock-time">--:--</div>
+      <div class="clock-date"></div>
+    </div>
+    <button id="hotspot" class="hotspot" type="button" aria-label="Parent unlock" hidden></button>
+  </section>
+
+  <section id="pinpad" class="pinpad" hidden>
+    <div class="pin-card">
+      <p class="pin-title">Parent PIN</p>
+      <div class="pin-dots" aria-live="polite"></div>
+      <p class="pin-message" hidden></p>
+      <div class="pin-keys">
+        <button type="button" data-key="1">1</button>
+        <button type="button" data-key="2">2</button>
+        <button type="button" data-key="3">3</button>
+        <button type="button" data-key="4">4</button>
+        <button type="button" data-key="5">5</button>
+        <button type="button" data-key="6">6</button>
+        <button type="button" data-key="7">7</button>
+        <button type="button" data-key="8">8</button>
+        <button type="button" data-key="9">9</button>
+        <button type="button" data-key="cancel" class="pin-soft">Cancel</button>
+        <button type="button" data-key="0">0</button>
+        <button type="button" data-key="back" class="pin-soft" aria-label="Delete">⌫</button>
+      </div>
+      <button type="button" class="pin-ok" data-key="ok">Unlock</button>
+    </div>
+  </section>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

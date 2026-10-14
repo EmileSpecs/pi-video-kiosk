@@ -1,9 +1,462 @@
-html, body { margin: 0; height: 100%; background: #000; color: #fff; }
-body { font-family: sans-serif; user-select: none; touch-action: manipulation; }
-#grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px; height: 100%; box-sizing: border-box; }
-button.tile { border: 0; padding: 0; border-radius: 24px; overflow: hidden; min-height: 200px; background: #1c1c1c center/cover no-repeat; }
-button.tile.now { outline: 6px solid #fff; }
-#locked { position: fixed; inset: 0; background: #000; }
-@media (orientation: portrait) {
-  #grid { grid-template-columns: repeat(2, 1fr); }
+/* Pi Video Kiosk touch grid. Hand-written; no build step. */
+
+:root {
+  --cols: 3;
+  --rows: 2;
+  --gap: 16px;
+  --pad: 16px;
+  --radius: 20px;
+  --bg: #0b0f19;
+  --card: #1a2235;
+  --text: #f4f6fb;
+  --muted: #9aa5bd;
+  --accent: #ffb545;
+  --accent-glow: rgba(255, 181, 69, 0.55);
+  --danger: #ff6b6b;
+  --font: "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif;
 }
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* Grid ----------------------------------------------------------------- */
+
+.grid {
+  height: 100dvh;
+  padding: var(--pad);
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  grid-auto-rows: calc((100dvh - 2 * var(--pad) - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+  scrollbar-width: none;
+}
+
+.card {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--radius);
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  scroll-snap-align: start;
+  outline: none;
+  transform: translateZ(0);
+  transition: transform 120ms ease, box-shadow 200ms ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.card:active {
+  transform: scale(0.96);
+}
+
+.card.selected {
+  box-shadow: 0 0 0 5px var(--accent), 0 0 32px 6px var(--accent-glow);
+}
+
+.card.playing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 5px var(--accent);
+  animation: pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.card .thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--placeholder, var(--card));
+  display: block;
+}
+
+.card .placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(40px, 9vmin, 96px);
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  background: var(--placeholder, var(--card));
+}
+
+.card .shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.72) 100%);
+  pointer-events: none;
+}
+
+.card .title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 14px 12px;
+  font-size: clamp(16px, 3.2vmin, 26px);
+  font-weight: 650;
+  line-height: 1.15;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card .badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: clamp(11px, 2vmin, 14px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(4px);
+}
+
+.card .badge.offline {
+  right: auto;
+  left: 10px;
+}
+
+.card .stack {
+  width: 16px;
+  height: 12px;
+  position: relative;
+}
+.card .stack::before,
+.card .stack::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.card .stack::before {
+  top: 0;
+  box-shadow: 0 4.5px 0 currentColor;
+}
+.card .stack::after {
+  bottom: 0;
+}
+
+/* Busy overlay on the tapped card */
+
+.card .busy {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(8, 12, 20, 0.62);
+  backdrop-filter: blur(2px);
+  color: #fff;
+  font-size: clamp(15px, 3vmin, 22px);
+  font-weight: 600;
+}
+
+.card.loading .busy {
+  display: flex;
+}
+
+.spinner {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 5px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+.card .bar {
+  width: 60%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+
+.card .bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 300ms ease;
+}
+
+/* Empty, banner, toast ---------------------------------------------------- */
+
+.empty {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--muted);
+}
+
+.empty h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(24px, 5vmin, 40px);
+}
+
+.empty p {
+  margin: 0;
+  font-size: clamp(14px, 3vmin, 20px);
+}
+
+.empty-mark,
+.locked-mark {
+  font-size: clamp(56px, 14vmin, 140px);
+  line-height: 1;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.banner {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 14px;
+  z-index: 5;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  max-width: min(92vw, 640px);
+  padding: 14px 20px;
+  border-radius: 16px;
+  background: #2a1b1f;
+  border: 1px solid rgba(255, 107, 107, 0.5);
+  color: #fff;
+  font-size: clamp(15px, 3vmin, 20px);
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 6;
+  animation: rise 220ms ease-out;
+}
+
+/* Locked screen ---------------------------------------------------------- */
+
+.locked {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+
+.locked-logo,
+.locked-clock {
+  text-align: center;
+  display: grid;
+  gap: 12px;
+}
+
+.locked-name {
+  color: var(--muted);
+  font-size: clamp(18px, 4vmin, 32px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.clock-time {
+  font-size: clamp(72px, 24vmin, 220px);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #e9edf7;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock-date {
+  color: var(--muted);
+  font-size: clamp(16px, 4vmin, 32px);
+}
+
+.hotspot {
+  position: fixed;
+  width: 22vmin;
+  height: 22vmin;
+  min-width: 96px;
+  min-height: 96px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  z-index: 11;
+}
+.hotspot.top_left { top: 0; left: 0; }
+.hotspot.top_right { top: 0; right: 0; }
+.hotspot.bottom_left { bottom: 0; left: 0; }
+.hotspot.bottom_right { bottom: 0; right: 0; }
+
+/* PIN pad ---------------------------------------------------------------- */
+
+.pinpad {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 20;
+}
+
+.pin-card {
+  width: min(92vw, 360px);
+  padding: 20px;
+  border-radius: 24px;
+  background: #141a28;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  display: grid;
+  gap: 14px;
+  text-align: center;
+}
+
+.pin-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pin-dots {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  min-height: 18px;
+}
+
+.pin-dots i {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.pin-message {
+  margin: 0;
+  color: var(--danger);
+  font-size: 14px;
+  min-height: 1.2em;
+}
+
+.pin-card.shake {
+  animation: shake 320ms ease;
+}
+
+.pin-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pin-keys button,
+.pin-ok {
+  height: 56px;
+  border: 0;
+  border-radius: 14px;
+  background: #222b40;
+  color: #fff;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.pin-keys button:active,
+.pin-ok:active {
+  transform: scale(0.96);
+  background: #2d3852;
+}
+
+.pin-keys .pin-soft {
+  background: #1a2133;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.pin-ok {
+  background: var(--accent);
+  color: #1a1200;
+}
+
+/* Animations ------------------------------------------------------------- */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-8px); }
+  75% { transform: translateX(8px); }
+}
+
+/* --rows is set by app.js from the column width so cards stay close to 16:9
+   and the panel always shows whole rows. */
