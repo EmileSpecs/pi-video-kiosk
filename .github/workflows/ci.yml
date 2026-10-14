@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Python package
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check pikiosk tests && mypy
+      - name: Test
+        run: pytest --cov
+      - name: Admin stylesheet is committed
+        run: |
+          npm ci
+          npm run css
+          git diff --exit-code -- pikiosk/web/static/admin.css
