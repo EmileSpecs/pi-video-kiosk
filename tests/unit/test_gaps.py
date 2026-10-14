@@ -286,6 +286,7 @@ async def test_mpv_player_run(monkeypatch: pytest.MonkeyPatch) -> None:
     assert restarted
     player._last_restart = asyncio.get_running_loop().time()
     await player._request_restart()
+    assert len(restarted) == 1, "a second restart within a minute is suppressed"
     await player.stop_client()
 
 

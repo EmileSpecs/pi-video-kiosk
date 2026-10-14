@@ -25,6 +25,10 @@ async def test_round_trip(tmp_path) -> None:
     await client.command("set_property", "volume", 40)
     assert await client.command("get_property", "volume") == 40
     await server.simulate_eof()
+    for _ in range(100):
+        if any(event.get("reason") == "eof" for event in events):
+            break
+        await asyncio.sleep(0.01)
     await client.close()
     await server.stop()
     assert any(event.get("event") == "file-loaded" for event in events)

@@ -36,7 +36,7 @@ class MpvPlayer:
         self.loop_playlist = False
         self.connected = False
         self._restart_lock = asyncio.Lock()
-        self._last_restart = 0.0
+        self._last_restart: float | None = None
         self._down_reason: str | None = None
 
     def add_listener(self, listener: PlayerListener) -> None:
@@ -123,7 +123,9 @@ class MpvPlayer:
 
     async def _request_restart(self) -> None:
         loop = asyncio.get_running_loop()
-        if loop.time() - self._last_restart < 60:
+        # loop.time() is seconds since boot on Linux, so a plain 0.0 default
+        # would swallow the first restart for a minute after power-on.
+        if self._last_restart is not None and loop.time() - self._last_restart < 60:
             return
         self._last_restart = loop.time()
         log.warning("mpv hang detected; requesting restart")
