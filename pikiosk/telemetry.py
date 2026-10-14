@@ -52,6 +52,24 @@ def local_ip(remote_host: str, remote_port: int = 80) -> str | None:
     return str(address)
 
 
+def cache_usage(directory: str) -> tuple[float, int]:
+    root = Path(directory).expanduser()
+    if not root.is_dir():
+        return 0.0, 0
+    total = 0
+    items = 0
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix in {".part", ".json", ".tmp"}:
+            continue
+        try:
+            total += path.stat().st_size
+        except OSError:
+            continue
+        if path.suffix in {".mkv", ".mp4", ".webm", ".m4a"}:
+            items += 1
+    return round(total / (1024**3), 2), items
+
+
 def collect(
     *,
     mqtt_host: str,

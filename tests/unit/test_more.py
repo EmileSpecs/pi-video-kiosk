@@ -187,6 +187,41 @@ def test_telemetry_and_logging(tmp_path: Path, capsys) -> None:
     Notifier(path=None).status("ok")
 
 
+async def test_refresh_telemetry_publishes(tmp_path: Path, example_config, monkeypatch) -> None:
+    monkeypatch.setattr("pikiosk.telemetry.local_ip", lambda host, port=80: "192.168.1.10")
+    video = tmp_path / "videos"
+    video.mkdir()
+    (video / "clip.mp4").write_bytes(b"1234")
+    config = example_config.model_copy(
+        update={"offline": example_config.offline.model_copy(update={"directory": str(video)})}
+    )
+    from pikiosk.app import App
+
+    app = App(config, simulate=True, state_path=tmp_path / "state.json")
+
+    class _Yt:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def version(self) -> str:
+            self.calls += 1
+            return "2026.10.1\n"
+
+    ytdlp = _Yt()
+    app.controller.ytdlp = ytdlp  # type: ignore[assignment]
+    app.transport.connected = True
+    await app._refresh_telemetry()
+    await app._refresh_telemetry()
+    assert ytdlp.calls == 1
+    assert app.bridge.telemetry["ytdlp_version"] == "2026.10.1"
+    assert app.bridge.telemetry["ip"] == "192.168.1.10"
+    assert app.bridge.telemetry["cache_items"] == 1
+    assert any(
+        item.topic.endswith("/telemetry") and "2026.10.1" in item.payload
+        for item in app.transport.published
+    )
+
+
 def test_cache_window_and_evict(tmp_path: Path, example_config) -> None:
     clock = FakeClock()
     clock.set_now(datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc))

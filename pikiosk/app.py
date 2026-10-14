@@ -26,6 +26,7 @@ from pikiosk.player.mpv_player import MpvPlayer
 from pikiosk.screen.backlight import Backlight, discover_backlight
 from pikiosk.screen.output import RecordingOutput, WlrRandr
 from pikiosk.screen.screen_service import ScreenService
+from pikiosk.telemetry import cache_usage, collect
 from pikiosk.watchdog import Notifier
 from pikiosk.web.admin import create_admin_app
 from pikiosk.web.server import create_child_app
@@ -103,6 +104,7 @@ class App:
             self.config_store = ConfigStore(config_path, secrets_path)
         self.notifier = Notifier()
         self._runners: list[web.AppRunner] = []
+        self._ytdlp_version = ""
 
     async def _restart(self) -> None:
         log.info("restart requested")
@@ -142,8 +144,10 @@ class App:
         await self.bridge.start()
         await self._serve()
         heartbeat = asyncio.create_task(self._heartbeat())
+        telemetry = asyncio.create_task(self._telemetry_loop())
         await self._stop.wait()
         heartbeat.cancel()
+        telemetry.cancel()
         self.notifier.stopping()
         self.store.save(self.controller.state)
         await self.bridge.stop()
@@ -160,6 +164,32 @@ class App:
                 f"mpv={'up' if state.mpv_connected else 'down'} "
                 f"state={state.player.value}"
             )
+
+    async def _telemetry_loop(self) -> None:
+        while True:
+            await self._refresh_telemetry()
+            await asyncio.sleep(max(5, self.config.telemetry.interval_s))
+
+    async def _refresh_telemetry(self) -> None:
+        ytdlp = self.controller.ytdlp
+        if ytdlp is not None and not self._ytdlp_version:
+            try:
+                self._ytdlp_version = (await ytdlp.version()).strip()
+            except Exception:
+                log.warning("yt-dlp version failed", exc_info=True)
+        used_gb, items = await asyncio.to_thread(cache_usage, self.config.offline.directory)
+        payload = await asyncio.to_thread(
+            collect,
+            mqtt_host=self.config.mqtt.host,
+            ytdlp_version=self._ytdlp_version,
+            cache_used_gb=used_gb,
+            cache_items=items,
+        )
+        self.bridge.telemetry = payload
+        try:
+            await self.bridge.publish_telemetry()
+        except Exception:
+            log.warning("telemetry publish failed", exc_info=True)
 
     async def _serve(self) -> None:
         child = create_child_app(self.controller)
