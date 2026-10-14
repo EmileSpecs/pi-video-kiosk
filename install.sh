@@ -361,15 +361,52 @@ TryExec=labwc
 Type=Application
 DesktopNames=labwc;wlroots
 EOF
-  if [[ -d /etc/lightdm ]]; then
-    install -d /etc/lightdm/lightdm.conf.d
-    cat > /etc/lightdm/lightdm.conf.d/50-pikiosk.conf << EOF
-[Seat:*]
-autologin-user=$USER_NAME
-autologin-user-timeout=0
-autologin-session=pikiosk
-user-session=pikiosk
-EOF
+  if [[ -d /etc/lightdm || -f /etc/lightdm/lightdm.conf ]]; then
+    install -d /etc/lightdm
+    # lightdm.conf is loaded after conf.d, so the desktop session named there wins.
+    python3 - "$USER_NAME" << 'PY'
+import sys
+from pathlib import Path
+user = sys.argv[1]
+path = Path("/etc/lightdm/lightdm.conf")
+wanted = {
+    "autologin-user": user,
+    "autologin-user-timeout": "0",
+    "autologin-session": "pikiosk",
+    "user-session": "pikiosk",
+}
+text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else "[Seat:*]\n"
+lines = text.splitlines()
+seen = set()
+out = []
+section = None
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        section = stripped[1:-1]
+        out.append(line)
+        continue
+    if section in ("Seat:*", "SeatDefaults") and "=" in stripped:
+        key = stripped.lstrip("#").split("=", 1)[0].strip()
+        if key in wanted:
+            out.append(f"{key}={wanted[key]}")
+            seen.add(key)
+            continue
+    out.append(line)
+if any(key not in seen for key in wanted):
+    last = None
+    for line in out:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            last = stripped[1:-1]
+    if last not in ("Seat:*", "SeatDefaults"):
+        out.append("[Seat:*]")
+    for key, value in wanted.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+    rm -f /etc/lightdm/lightdm.conf.d/50-pikiosk.conf
     systemctl restart lightdm || true
   else
     cat > /etc/systemd/system/pikiosk-labwc.service << EOF
