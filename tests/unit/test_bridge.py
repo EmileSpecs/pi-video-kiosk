@@ -143,6 +143,7 @@ async def test_removed_entity_cleared(bridge, example_config) -> None:
     await mqtt._on_connect()
     slim = example_config.model_copy(update={"catalog": example_config.catalog.model_copy(update={"items": []})})
     mqtt.update_config(slim)
+    assert mqtt._reconnect.is_set() is False
     mqtt.controller.config = slim
     await mqtt.publish_discovery()
     emptied = [item for item in transport.published if item.payload == ""]

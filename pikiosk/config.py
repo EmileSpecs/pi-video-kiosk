@@ -95,6 +95,23 @@ class MqttConfig(BaseModel):
     def resolved_client_id(self, device_id: str) -> str:
         return self.client_id or f"pikiosk-{device_id}"
 
+    def connection_key(self, device_id: str) -> tuple[object, ...]:
+        tls = self.tls
+        return (
+            self.host,
+            self.port,
+            self.username,
+            self.password,
+            self.client_id,
+            self.keepalive,
+            self.base_topic,
+            self.discovery_prefix,
+            tls.enabled,
+            tls.ca_file,
+            tls.insecure,
+            device_id,
+        )
+
 
 class PlaybackConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")

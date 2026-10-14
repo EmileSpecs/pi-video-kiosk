@@ -50,12 +50,18 @@ class MqttBridge:
         controller.subscribe(self._on_state)
         controller.bus.subscribe(self._on_event)
 
-    def update_config(self, config: KioskConfig) -> None:
+    def update_config(self, config: KioskConfig) -> bool:
+        previous = self.config
         self.config = config
         self.topics = Topics(config)
         if getattr(self.transport, "config", None) is not None:
             self.transport.config = config  # type: ignore[attr-defined]
-        self._reconnect.set()
+        reconnect = previous.mqtt.connection_key(previous.device.id) != config.mqtt.connection_key(
+            config.device.id
+        )
+        if reconnect:
+            self._reconnect.set()
+        return reconnect
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self.run())

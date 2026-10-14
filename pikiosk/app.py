@@ -118,10 +118,17 @@ class App:
         config = self.config_store.reload()
         catalog = make_catalog(config)
         await self.controller.apply_config(config, catalog)
-        self.bridge.update_config(config)
-        if self.bridge.transport.connected:
-            await self.bridge.publish_discovery()
+        reconnect = self.bridge.update_config(config)
         self.config = config
+        # A broker change reconnects on its own and publishes discovery after
+        # the new session is up. Republishing on the socket that is about to
+        # close makes the publish wait until it times out.
+        if reconnect or not self.bridge.transport.connected:
+            return
+        try:
+            await self.bridge.publish_discovery()
+        except Exception:
+            log.warning("discovery republish failed", exc_info=True)
 
     def stop(self) -> None:
         self._stop.set()
