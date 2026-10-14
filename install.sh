@@ -149,20 +149,33 @@ fix_perms() {
   done
 }
 
+as_user() {
+  # Run in the checkout. An editable install adds a fake sys.path entry, and pip
+  # stats it from the current directory. The SSH home is not readable by the
+  # service user, so that stat fails unless the command starts here.
+  sudo -u "$USER_NAME" bash -c 'cd "$1" && shift && exec "$@"' _ "$PREFIX" "$@"
+}
+
 install_venv() {
   if [[ ! -d "$PREFIX/venv" ]]; then
-    sudo -u "$USER_NAME" python3 -m venv "$PREFIX/venv"
+    as_user python3 -m venv "$PREFIX/venv"
   fi
-  sudo -u "$USER_NAME" "$PREFIX/venv/bin/pip" install -U pip
+  local hook
+  shopt -s nullglob
+  for hook in "$PREFIX"/venv/lib/python*/site-packages/__editable__*pikiosk* \
+              "$PREFIX"/venv/lib/python*/site-packages/__editable___pikiosk*; do
+    rm -f "$hook"
+  done
+  as_user "$PREFIX/venv/bin/pip" install -U pip
   if [[ -f "$PREFIX/requirements.lock" ]]; then
-    sudo -u "$USER_NAME" "$PREFIX/venv/bin/pip" install -r "$PREFIX/requirements.lock"
+    as_user "$PREFIX/venv/bin/pip" install -r "$PREFIX/requirements.lock"
   fi
   if [[ "$DEV" -eq 1 ]]; then
-    sudo -u "$USER_NAME" "$PREFIX/venv/bin/pip" install -e "$PREFIX"
+    as_user "$PREFIX/venv/bin/pip" install -e "$PREFIX" --config-settings editable_mode=compat
   else
-    sudo -u "$USER_NAME" "$PREFIX/venv/bin/pip" install "$PREFIX"
+    as_user "$PREFIX/venv/bin/pip" install "$PREFIX"
   fi
-  sudo -u "$USER_NAME" "$PREFIX/venv/bin/pip" install -U "yt-dlp[default]" || warn "yt-dlp install failed"
+  as_user "$PREFIX/venv/bin/pip" install -U "yt-dlp[default]" || warn "yt-dlp install failed"
   chown -R "$USER_NAME:$USER_NAME" "$PREFIX/venv"
 }
 
@@ -313,7 +326,29 @@ PY
   systemctl disable --now squeekboard.service >/dev/null 2>&1 || true
 }
 
+stop_previous_user() {
+  # The first install may have used the default account. Leave it running and
+  # both copies try to bind the same ports.
+  local other other_home other_uid wants
+  [[ "$USER_NAME" == "kiosk" ]] && return 0
+  id kiosk >/dev/null 2>&1 || return 0
+  other=kiosk
+  other_home=$(getent passwd "$other" | cut -d: -f6)
+  other_uid=$(id -u "$other")
+  if [[ -d "/run/user/$other_uid" ]]; then
+    sudo -u "$other" XDG_RUNTIME_DIR="/run/user/$other_uid" systemctl --user disable --now \
+      pikioskd.service pikiosk-mpv.service pikiosk-ui.service \
+      pikiosk-update.timer pikiosk-ytdlp-update.timer || true
+  fi
+  loginctl disable-linger "$other" || true
+  wants="$other_home/.config/systemd/user/default.target.wants"
+  rm -f "$wants/pikioskd.service" "$wants/pikiosk-mpv.service" \
+    "$wants/pikiosk-ui.service" "$wants/pikiosk-update.timer" \
+    "$wants/pikiosk-ytdlp-update.timer"
+}
+
 install_units() {
+  stop_previous_user
   dest="/home/$USER_NAME/.config/systemd/user"
   install -d -o "$USER_NAME" -g "$USER_NAME" "$dest"
   for unit in "$PREFIX"/system/systemd/user/*; do
@@ -326,7 +361,8 @@ install_units() {
     sudo -u "$USER_NAME" XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user "$@" || true
   }
   run_user daemon-reload
-  run_user enable pikioskd.service pikiosk-ytdlp-update.timer pikiosk-update.timer
+  run_user enable --now pikioskd.service
+  run_user enable pikiosk-ytdlp-update.timer pikiosk-update.timer
   if [[ "$NO_UI" -eq 0 ]]; then
     run_user enable --now pikiosk-mpv.service
     run_user enable pikiosk-ui.service

@@ -63,11 +63,21 @@ if [ "$remote" = "$before" ]; then
   exit 0
 fi
 
+drop_editable_hook() {
+  for hook in "$ROOT"/venv/lib/python*/site-packages/__editable__*pikiosk* \
+              "$ROOT"/venv/lib/python*/site-packages/__editable___pikiosk*; do
+    if [ -e "$hook" ]; then
+      rm -f "$hook"
+    fi
+  done
+}
+
 rollback() {
   echo "update failed; restoring $before" >&2
   git reset --hard "$before"
+  drop_editable_hook
   "$ROOT/venv/bin/pip" install -r "$ROOT/requirements.lock"
-  "$ROOT/venv/bin/pip" install -e "$ROOT"
+  "$ROOT/venv/bin/pip" install "$ROOT"
   systemctl --user restart pikioskd.service || true
 }
 
@@ -75,11 +85,12 @@ if ! git pull --ff-only origin "$ref"; then
   echo "fast-forward failed" >&2
   exit 1
 fi
+drop_editable_hook
 if ! "$ROOT/venv/bin/pip" install -r "$ROOT/requirements.lock"; then
   rollback
   exit 1
 fi
-if ! "$ROOT/venv/bin/pip" install -e "$ROOT"; then
+if ! "$ROOT/venv/bin/pip" install "$ROOT"; then
   rollback
   exit 1
 fi
