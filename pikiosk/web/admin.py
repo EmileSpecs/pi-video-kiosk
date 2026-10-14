@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import quote
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -106,9 +107,14 @@ def _render(
         nav=NAV,
         active=template.replace(".html", ""),
         error=extra.pop("error", None),
+        notice=extra.pop("notice", None) or request.query.get("notice"),
         **extra,
     )
     return web.Response(text=html, content_type="text/html")
+
+
+def _done(path: str, notice: str = "Saved.") -> web.HTTPFound:
+    return web.HTTPFound(f"{path}?notice={quote(notice)}")
 
 
 def _check_csrf(request: web.Request, data: Any, session: dict[str, Any]) -> None:
@@ -263,7 +269,7 @@ async def connection_post(request: web.Request) -> web.Response:
     error = await _save(request, config, secrets)
     if error:
         return _render(request, "connection.html", session, error=error, form=form)
-    raise web.HTTPFound("/connection?notice=saved")
+    raise _done("/connection")
 
 
 async def connection_test(request: web.Request) -> web.Response:
@@ -335,7 +341,7 @@ async def catalog_post(request: web.Request) -> web.Response:
     error = await _save(request, config, dict(store.secrets))
     if error:
         return _render(request, "catalog.html", session, error=error)
-    raise web.HTTPFound("/catalog")
+    raise _done("/catalog")
 
 
 async def playback_page(request: web.Request) -> web.Response:
@@ -366,7 +372,7 @@ async def playback_post(request: web.Request) -> web.Response:
     error = await _save(request, config, dict(store.secrets))
     if error:
         return _render(request, "playback.html", session, error=error)
-    raise web.HTTPFound("/playback")
+    raise _done("/playback")
 
 
 async def screen_page(request: web.Request) -> web.Response:
@@ -396,7 +402,7 @@ async def screen_post(request: web.Request) -> web.Response:
     error = await _save(request, config, dict(store.secrets))
     if error:
         return _render(request, "screen.html", session, error=error)
-    raise web.HTTPFound("/screen")
+    raise _done("/screen")
 
 
 async def updates_page(request: web.Request) -> web.Response:
@@ -425,7 +431,8 @@ async def updates_post(request: web.Request) -> web.Response:
         return _render(request, "updates.html", session, error=error)
     if data.get("action") == "now":
         await controller.cmd_update_app()
-    raise web.HTTPFound("/updates")
+        raise _done("/updates", "Update started.")
+    raise _done("/updates")
 
 
 async def offline_page(request: web.Request) -> web.Response:
@@ -455,7 +462,8 @@ async def offline_post(request: web.Request) -> web.Response:
         return _render(request, "offline.html", session, error=error)
     if data.get("action") == "sync":
         await controller.cmd_sync_offline()
-    raise web.HTTPFound("/offline")
+        raise _done("/offline", "Sync started.")
+    raise _done("/offline")
 
 
 async def touch_page(request: web.Request) -> web.Response:
@@ -481,7 +489,7 @@ async def touch_post(request: web.Request) -> web.Response:
     error = await _save(request, config, dict(store.secrets))
     if error:
         return _render(request, "touch.html", session, error=error)
-    raise web.HTTPFound("/touch")
+    raise _done("/touch")
 
 
 async def health(request: web.Request) -> web.Response:

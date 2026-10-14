@@ -3,7 +3,6 @@
 <section class="space-y-4">
   <div class="pk-card space-y-3">
     <h1 class="text-2xl font-semibold">Approved videos</h1>
-    {% if error %}<p class="pk-alert">{{ error }}</p>{% endif %}
     <ul class="divide-y divide-slate-200">
       {% for item in config.catalog.items %}
       <li class="flex items-center justify-between gap-3 py-3">

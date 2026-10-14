@@ -19,6 +19,24 @@
     @apply rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white;
   }
   .pk-alert {
-    @apply rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800;
+    @apply mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800;
+  }
+  .pk-notice {
+    @apply mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800;
+    animation: pk-notice-in 0.25s ease-out;
+  }
+  .pk-busy {
+    @apply opacity-70;
+  }
+}
+
+@keyframes pk-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }

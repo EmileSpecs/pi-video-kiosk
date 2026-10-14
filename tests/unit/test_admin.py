@@ -83,7 +83,8 @@ async def test_catalog_save_reloads(tmp_path, clock) -> None:
             },
             allow_redirects=False,
         )
-        assert response.status in {200, 302, 303}
+        assert response.status in {302, 303}
+        assert "notice=Saved" in response.headers["Location"]
         reloaded = load_config(store.config_path, secrets_path=store.secrets_path)
         assert any(item.name == "Extra" for item in reloaded.catalog.items)
         assert "Extra" in controller.catalog.by_name

@@ -17,8 +17,20 @@
       </nav>
     </aside>
     <main class="min-w-0 flex-1">
+      {% if notice %}<p class="pk-notice" role="status">{{ notice }}</p>{% endif %}
+      {% if error %}<p class="pk-alert" role="alert">{{ error }}</p>{% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>
+  <script>
+    document.addEventListener("submit", (event) => {
+      const button = event.submitter;
+      if (!button) return;
+      button.setAttribute("aria-busy", "true");
+      button.classList.add("pk-busy");
+      const label = button.textContent.trim();
+      button.textContent = label === "Save" || label === "Add" ? "Saving…" : label + "…";
+    });
+  </script>
 </body>
 </html>
