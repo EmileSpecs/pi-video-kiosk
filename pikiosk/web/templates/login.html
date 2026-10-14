@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Pi Kiosk</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body class="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+  <form method="post" action="/login" class="pk-card w-full max-w-sm space-y-4">
+    <h1 class="text-xl font-semibold">Pi Kiosk</h1>
+    <p class="text-sm text-slate-600">Sign in to edit videos, playlists, and the Home Assistant connection.</p>
+    {% if error %}<p class="pk-alert">That password did not match.</p>{% endif %}
+    <label class="pk-field">Password
+      <input class="pk-input" type="password" name="password" autofocus required>
+    </label>
+    <button class="pk-button w-full" type="submit">Sign in</button>
+  </form>
+</body>
+</html>

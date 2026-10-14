@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="pk-card space-y-3">
+  <h1 class="text-2xl font-semibold">Status</h1>
+  <dl class="grid grid-cols-2 gap-3 text-sm">
+    <div><dt class="text-slate-500">Player</dt><dd class="font-medium">{{ state.player.value }}</dd></div>
+    <div><dt class="text-slate-500">Screen</dt><dd class="font-medium">{{ "on" if state.screen_on else "off" }}</dd></div>
+    <div><dt class="text-slate-500">MQTT</dt><dd class="font-medium">{{ "connected" if state.mqtt_connected else "offline" }}</dd></div>
+    <div><dt class="text-slate-500">mpv</dt><dd class="font-medium">{{ "connected" if state.mpv_connected else "offline" }}</dd></div>
+    <div class="col-span-2"><dt class="text-slate-500">Now</dt><dd class="font-medium">{{ state.now.title if state.now else "Idle" }}</dd></div>
+    <div class="col-span-2"><dt class="text-slate-500">Last error</dt><dd>{{ state.last_error or "—" }}</dd></div>
+  </dl>
+</section>
+{% endblock %}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Pi Kiosk touch UI (Chromium kiosk)
+PartOf=pikiosk-session.target
+After=pikiosk-session.target pikioskd.service
+
+[Service]
+Type=simple
+ExecStartPre=/opt/pi-kiosk/bin/wait-for-http http://127.0.0.1:8088/healthz 60
+ExecStart=/opt/pi-kiosk/bin/run-chromium.sh
+Restart=always
+RestartSec=3
+SyslogIdentifier=pikiosk-ui
+
+[Install]
+WantedBy=pikiosk-session.target

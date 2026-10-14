@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="pk-card space-y-4">
+  <h1 class="text-2xl font-semibold">Home Assistant connection</h1>
+  {% if error %}<p class="pk-alert">{{ error }}</p>{% endif %}
+  {% if notice %}<p class="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ notice }}</p>{% endif %}
+  <form method="post" action="/connection" class="space-y-4">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="pk-field">Device id
+      <input class="pk-input" name="device_id" value="{{ config.device.id }}" {% if state.mqtt_ever_connected %}readonly{% endif %}>
+    </label>
+    <label class="pk-field">Name
+      <input class="pk-input" name="name" value="{{ config.device.name }}">
+    </label>
+    <div class="grid gap-4 md:grid-cols-2">
+      <label class="pk-field">Broker host
+        <input class="pk-input" name="host" value="{{ config.mqtt.host }}" required>
+      </label>
+      <label class="pk-field">Port
+        <input class="pk-input" name="port" type="number" value="{{ config.mqtt.port }}">
+      </label>
+    </div>
+    <label class="pk-field">Username
+      <input class="pk-input" name="username" value="{{ config.mqtt.username or '' }}">
+    </label>
+    <label class="pk-field">Password
+      <input class="pk-input" type="password" name="password" placeholder="{% if config.mqtt.password %}configured{% else %}not set{% endif %}" autocomplete="new-password">
+    </label>
+    <label class="pk-field">Base topic
+      <input class="pk-input" name="base_topic" value="{{ config.mqtt.base_topic }}">
+    </label>
+    <label class="pk-field">Discovery prefix
+      <input class="pk-input" name="discovery_prefix" value="{{ config.mqtt.discovery_prefix }}">
+    </label>
+    <label class="flex items-center gap-2 text-sm">
+      <input type="checkbox" name="tls" {% if config.mqtt.tls.enabled %}checked{% endif %}> TLS
+    </label>
+    <div class="flex gap-2">
+      <button class="pk-button" type="submit">Save</button>
+      <button class="rounded-lg border border-slate-300 px-4 py-2 text-sm" type="submit" formaction="/connection/test">Test connection</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

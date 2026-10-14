@@ -1,0 +1,5 @@
+#!/bin/sh
+# Black idle screen. No panel, desktop icons, on-screen keyboard, or swayidle.
+swaybg -c '#000000' >/dev/null 2>&1 &
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_RUNTIME_DIR
+systemctl --user start pikiosk-session.target &

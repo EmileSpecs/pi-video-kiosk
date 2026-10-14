@@ -1,0 +1,22 @@
+[Unit]
+Description=Pi Kiosk controller (MQTT, player control, screen)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/opt/pi-kiosk/venv/bin/pikioskd --config /etc/pi-kiosk/config.yaml --state %h/.local/state/pi-kiosk/state.json
+Restart=always
+RestartSec=3
+WatchdogSec=30
+TimeoutStopSec=10
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h/.local/state/pi-kiosk
+SyslogIdentifier=pikioskd
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

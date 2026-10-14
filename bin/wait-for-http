@@ -1,0 +1,16 @@
+#!/bin/sh
+# Wait until a URL answers. HTTP 503 still counts: the process is up.
+set -eu
+url=${1:?url}
+tries=${2:-60}
+i=0
+while [ "$i" -lt "$tries" ]; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$url" || true)
+  if [ "$code" = "200" ] || [ "$code" = "503" ]; then
+    exit 0
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+echo "timed out waiting for $url" >&2
+exit 1

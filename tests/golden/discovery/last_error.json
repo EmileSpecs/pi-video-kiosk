@@ -1,0 +1,34 @@
+{
+  "availability": [
+    {
+      "topic": "pikiosk/kids_kiosk/status"
+    }
+  ],
+  "availability_mode": "all",
+  "device": {
+    "identifiers": [
+      "pikiosk_kids_kiosk"
+    ],
+    "name": "Kids Kiosk",
+    "manufacturer": "DIY",
+    "model": "Raspberry Pi 5 Video Kiosk",
+    "sw_version": "1.0.0",
+    "hw_version": "Raspberry Pi 5 Model B Rev 1.0 / Touch Display 2",
+    "suggested_area": "Bedroom",
+    "configuration_url": "http://192.168.1.57:8090"
+  },
+  "origin": {
+    "name": "pi-kiosk",
+    "sw_version": "1.0.0",
+    "support_url": "https://github.com/owner/pi-kiosk"
+  },
+  "has_entity_name": true,
+  "qos": 1,
+  "name": "Last error",
+  "unique_id": "pikiosk_kids_kiosk_last_error",
+  "default_entity_id": "sensor.kids_kiosk_last_error",
+  "state_topic": "pikiosk/kids_kiosk/state",
+  "value_template": "{{ value_json.last_error or '' }}",
+  "entity_category": "diagnostic",
+  "icon": "mdi:alert"
+}

@@ -1,0 +1,39 @@
+{
+  "availability": [
+    {
+      "topic": "pikiosk/kids_kiosk/status"
+    }
+  ],
+  "availability_mode": "all",
+  "device": {
+    "identifiers": [
+      "pikiosk_kids_kiosk"
+    ],
+    "name": "Kids Kiosk",
+    "manufacturer": "DIY",
+    "model": "Raspberry Pi 5 Video Kiosk",
+    "sw_version": "1.0.0",
+    "hw_version": "Raspberry Pi 5 Model B Rev 1.0 / Touch Display 2",
+    "suggested_area": "Bedroom",
+    "configuration_url": "http://192.168.1.57:8090"
+  },
+  "origin": {
+    "name": "pi-kiosk",
+    "sw_version": "1.0.0",
+    "support_url": "https://github.com/owner/pi-kiosk"
+  },
+  "has_entity_name": true,
+  "qos": 1,
+  "name": "Screen",
+  "unique_id": "pikiosk_kids_kiosk_screen",
+  "default_entity_id": "light.kids_kiosk_screen",
+  "schema": "json",
+  "command_topic": "pikiosk/kids_kiosk/cmd/screen",
+  "state_topic": "pikiosk/kids_kiosk/screen/state",
+  "brightness": true,
+  "brightness_scale": 255,
+  "supported_color_modes": [
+    "brightness"
+  ],
+  "icon": "mdi:tablet"
+}

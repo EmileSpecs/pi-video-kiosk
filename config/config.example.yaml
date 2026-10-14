@@ -1,0 +1,135 @@
+device:
+  id: kids_kiosk
+  name: "Kids Kiosk"
+  manufacturer: "DIY"
+  model: "Raspberry Pi 5 Video Kiosk"
+  suggested_area: "Bedroom"
+
+mqtt:
+  host: homeassistant.local
+  port: 1883
+  username: kiosk
+  password: !secret mqtt_password
+  client_id: null
+  keepalive: 30
+  base_topic: pikiosk
+  discovery_prefix: homeassistant
+  tls:
+    enabled: false
+    ca_file: null
+    insecure: false
+  reconnect:
+    min_delay_s: 1
+    max_delay_s: 60
+  position_publish_interval_s: 5
+  discovery_mode: component
+  legacy_object_id: false
+  image_entity: false
+
+playback:
+  ytdl_format: "bestvideo[height<=?720][vcodec^=avc1][fps<=?30]+bestaudio[acodec^=mp4a]/bestvideo[height<=?720][fps<=?30]+bestaudio/best[height<=?720]/best"
+  default_volume: 40
+  max_volume: 80
+  start_muted: false
+  after_video: stop
+  resume_on_boot: false
+  resume_position: true
+  allow_unlisted: true
+  allowed_hosts:
+    - youtube.com
+    - www.youtube.com
+    - m.youtube.com
+    - youtu.be
+    - music.youtube.com
+  prefer_offline: true
+  audio_device: auto
+  network_timeout_s: 30
+  after_video_scope: playlist
+
+screen:
+  backlight_device: auto
+  output_name: auto
+  rotation: 0
+  default_brightness: 70
+  min_brightness: 5
+  blank_method: backlight
+  sleep_enabled: true
+  sleep_timeout_min: 10
+  wake_on_touch: true
+  swallow_wake_touch: true
+  dim_before_sleep_s: 15
+
+ui:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8088
+  locked: false
+  locked_screen: black
+  touch_during_playback: ignore
+  long_press_stop_s: 0
+  columns: 3
+  admin_enabled: false
+  show_titles: false
+  parent_unlock:
+    enabled: false
+    hold_corner: top_right
+    hold_s: 5
+    pin: !secret ui_pin
+
+admin:
+  enabled: true
+  bind: 0.0.0.0
+  port: 8090
+  password: !secret admin_password
+
+offline:
+  enabled: false
+  directory: ~/.cache/pi-kiosk/videos
+  max_size_gb: 20
+  sync_interval_h: 12
+  download_window: "01:00-06:00"
+  rate_limit: null
+  only_offline: false
+  delete_after_days: 7
+
+ytdlp:
+  update_channel: stable
+  extra_args: []
+  cookies_file: null
+  test_id: XqZsoesa55w
+
+input:
+  touch_device: auto
+
+telemetry:
+  interval_s: 60
+
+logging:
+  level: INFO
+  file: null
+  json: false
+
+update:
+  auto: true
+  repo: null
+  ref: main
+  interval_min: 15
+  only_when_idle: true
+
+catalog:
+  items:
+    - name: "Baby Shark"
+      type: video
+      id: XqZsoesa55w
+    - name: "Sesame Street Songs"
+      type: playlist
+      id: PLxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      shuffle: false
+      max_items: 50
+    - name: "Bath song"
+      type: video
+      url: "https://youtu.be/WRVsOCh907o"
+      start: 3
+    - name: "Calm lights (local)"
+      type: file
+      path: /home/kiosk/Videos/calm.mp4

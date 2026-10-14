@@ -1,0 +1,38 @@
+{
+  "availability": [
+    {
+      "topic": "pikiosk/kids_kiosk/status"
+    },
+    {
+      "topic": "pikiosk/kids_kiosk/player/status"
+    }
+  ],
+  "availability_mode": "all",
+  "device": {
+    "identifiers": [
+      "pikiosk_kids_kiosk"
+    ],
+    "name": "Kids Kiosk",
+    "manufacturer": "DIY",
+    "model": "Raspberry Pi 5 Video Kiosk",
+    "sw_version": "1.0.0",
+    "hw_version": "Raspberry Pi 5 Model B Rev 1.0 / Touch Display 2",
+    "suggested_area": "Bedroom",
+    "configuration_url": "http://192.168.1.57:8090"
+  },
+  "origin": {
+    "name": "pi-kiosk",
+    "sw_version": "1.0.0",
+    "support_url": "https://github.com/owner/pi-kiosk"
+  },
+  "has_entity_name": true,
+  "qos": 1,
+  "name": "Duration",
+  "unique_id": "pikiosk_kids_kiosk_duration",
+  "default_entity_id": "sensor.kids_kiosk_duration",
+  "state_topic": "pikiosk/kids_kiosk/state",
+  "value_template": "{{ value_json.duration | round(0) if value_json.duration is not none else none }}",
+  "device_class": "duration",
+  "unit_of_measurement": "s",
+  "icon": "mdi:timer-outline"
+}

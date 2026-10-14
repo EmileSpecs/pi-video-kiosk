@@ -1,0 +1,25 @@
+<!-- pikiosk-start -->
+<windowRules>
+  <windowRule identifier="mpv" serverDecoration="no">
+    <action name="ToggleFullscreen"/>
+    <action name="ToggleAlwaysOnTop"/>
+    <action name="Focus"/>
+  </windowRule>
+  <windowRule identifier="chromium*" serverDecoration="no">
+    <action name="ToggleFullscreen"/>
+  </windowRule>
+</windowRules>
+<touch deviceName="" mapToOutput="DSI-1"/>
+<keyboard>
+  <keybind key="A-F4"><action name="None"/></keybind>
+  <keybind key="A-F11"><action name="None"/></keybind>
+  <keybind key="W-Return"><action name="None"/></keybind>
+  <keybind key="W-e"><action name="None"/></keybind>
+  <keybind key="C-A-t"><action name="None"/></keybind>
+</keyboard>
+<mouse>
+  <context name="Root">
+    <mousebind button="Right" action="Press"><action name="None"/></mousebind>
+  </context>
+</mouse>
+<!-- pikiosk-end -->

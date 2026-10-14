@@ -1,0 +1,7 @@
+[Unit]
+Description=Update Pi Kiosk from its git branch
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pi-kiosk/bin/pikiosk-update.sh --from-timer
+SyslogIdentifier=pikiosk-update

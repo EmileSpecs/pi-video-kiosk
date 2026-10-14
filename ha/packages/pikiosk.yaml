@@ -1,0 +1,174 @@
+# Drop this file in a Home Assistant packages directory.
+# Entity ids assume device.id is kids_kiosk. Search-and-replace that id if you chose another.
+# The update_app button is discovered over MQTT; it is not declared here.
+
+template:
+  - sensor:
+      - name: "Kids Kiosk volume level"
+        unique_id: pikiosk_kids_kiosk_volume_level
+        state: >
+          {% set v = states('number.kids_kiosk_volume') %}
+          {{ (v | float(0) / 100) | round(2) if v not in ['unknown','unavailable'] else none }}
+
+media_player:
+  - platform: universal
+    name: Kids Kiosk
+    unique_id: pikiosk_kids_kiosk_media_player
+    device_class: tv
+    state_template: >
+      {% set avail = not is_state('sensor.kids_kiosk_state', 'unavailable') %}
+      {% set s = states('sensor.kids_kiosk_state') %}
+      {% if not avail %}off
+      {% elif is_state('light.kids_kiosk_screen', 'off') and s not in ['playing'] %}off
+      {% elif s in ['playing', 'paused'] %}{{ s }}
+      {% elif s == 'loading' %}buffering
+      {% else %}idle{% endif %}
+    attributes:
+      volume_level: sensor.kids_kiosk_volume_level
+      is_volume_muted: switch.kids_kiosk_mute
+      media_title: sensor.kids_kiosk_title
+      media_duration: sensor.kids_kiosk_duration
+      media_position: sensor.kids_kiosk_position
+      media_position_updated_at: sensor.kids_kiosk_position|last_changed
+      entity_picture: sensor.kids_kiosk_thumbnail
+      source: select.kids_kiosk_video
+      source_list: select.kids_kiosk_video|options
+    commands:
+      turn_on:
+        action: light.turn_on
+        target: { entity_id: light.kids_kiosk_screen }
+      turn_off:
+        - action: button.press
+          target: { entity_id: button.kids_kiosk_stop }
+        - action: light.turn_off
+          target: { entity_id: light.kids_kiosk_screen }
+      media_play:
+        action: button.press
+        target: { entity_id: button.kids_kiosk_play }
+      media_pause:
+        action: button.press
+        target: { entity_id: button.kids_kiosk_pause }
+      media_play_pause:
+        action: mqtt.publish
+        data: { topic: pikiosk/kids_kiosk/cmd/play_pause, payload: PRESS }
+      media_stop:
+        action: button.press
+        target: { entity_id: button.kids_kiosk_stop }
+      media_next_track:
+        action: button.press
+        target: { entity_id: button.kids_kiosk_next }
+      media_previous_track:
+        action: button.press
+        target: { entity_id: button.kids_kiosk_previous }
+      volume_set:
+        action: number.set_value
+        target: { entity_id: number.kids_kiosk_volume }
+        data:
+          value: "{{ (volume_level * 100) | round(0) | int }}"
+      volume_up:
+        action: number.set_value
+        target: { entity_id: number.kids_kiosk_volume }
+        data:
+          value: "{{ [states('number.kids_kiosk_volume') | int(0) + 5, state_attr('number.kids_kiosk_volume','max') | int(80)] | min }}"
+      volume_down:
+        action: number.set_value
+        target: { entity_id: number.kids_kiosk_volume }
+        data:
+          value: "{{ [states('number.kids_kiosk_volume') | int(0) - 5, 0] | max }}"
+      volume_mute:
+        action: "switch.turn_{{ 'on' if is_volume_muted else 'off' }}"
+        target: { entity_id: switch.kids_kiosk_mute }
+      select_source:
+        action: select.select_option
+        target: { entity_id: select.kids_kiosk_video }
+        data: { option: "{{ source }}" }
+      play_media:
+        action: text.set_value
+        target: { entity_id: text.kids_kiosk_play_media }
+        data: { value: "{{ media_content_id }}" }
+      media_seek:
+        action: mqtt.publish
+        data: { topic: pikiosk/kids_kiosk/cmd/seek, payload: "{{ seek_position }}" }
+
+script:
+  kids_kiosk_play_video:
+    alias: "Kids Kiosk: play video"
+    mode: restart
+    fields:
+      ref:
+        description: "YouTube URL, 11-char video ID, or approved item name"
+        example: "https://youtu.be/XqZsoesa55w"
+        required: true
+        selector: { text: {} }
+      volume:
+        description: "Optional volume 0-100"
+        selector: { number: { min: 0, max: 80 } }
+    sequence:
+      - action: light.turn_on
+        target: { entity_id: light.kids_kiosk_screen }
+      - if: "{{ volume is defined }}"
+        then:
+          - action: number.set_value
+            target: { entity_id: number.kids_kiosk_volume }
+            data: { value: "{{ volume }}" }
+      - action: mqtt.publish
+        data:
+          topic: pikiosk/kids_kiosk/cmd/play_media
+          payload: "{{ {'ref': ref} | tojson }}"
+
+automation:
+  - id: pikiosk_bedtime_off
+    alias: "Kids Kiosk: bedtime off"
+    triggers:
+      - trigger: time
+        at: "19:00:00"
+    actions:
+      - action: button.press
+        target: { entity_id: button.kids_kiosk_stop }
+      - action: switch.turn_off
+        target: { entity_id: switch.kids_kiosk_ui_enabled }
+      - action: light.turn_off
+        target: { entity_id: light.kids_kiosk_screen }
+
+  - id: pikiosk_morning_on
+    alias: "Kids Kiosk: morning on"
+    triggers:
+      - trigger: time
+        at: "07:00:00"
+    conditions:
+      - condition: time
+        weekday: [mon, tue, wed, thu, fri, sat, sun]
+    actions:
+      - action: switch.turn_on
+        target: { entity_id: switch.kids_kiosk_ui_enabled }
+      - action: number.set_value
+        target: { entity_id: number.kids_kiosk_volume }
+        data: { value: 30 }
+      - action: light.turn_on
+        target: { entity_id: light.kids_kiosk_screen }
+        data: { brightness_pct: 60 }
+
+  - id: pikiosk_play_specific_video
+    alias: "Kids Kiosk: play favourite after school"
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.after_school
+        to: "on"
+    actions:
+      - action: script.kids_kiosk_play_video
+        data:
+          ref: "Baby Shark"
+          volume: 35
+
+  - id: pikiosk_offline_alert
+    alias: "Kids Kiosk: notify if offline 10 min"
+    triggers:
+      - trigger: state
+        entity_id: sensor.kids_kiosk_state
+        to: unavailable
+        for: "00:10:00"
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: "Kids Kiosk offline"
+          message: "The kiosk has been unavailable for 10 minutes."

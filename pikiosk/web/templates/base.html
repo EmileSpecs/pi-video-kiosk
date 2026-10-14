@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or "Pi Kiosk" }}</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-900">
+  <div class="mx-auto flex max-w-6xl flex-col gap-6 p-4 md:flex-row md:p-8">
+    <aside class="md:w-52 md:shrink-0">
+      <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Pi Kiosk</p>
+      <nav class="flex gap-2 overflow-x-auto md:flex-col">
+        {% for key, label in nav %}
+        <a class="rounded-lg px-3 py-2 text-sm font-medium {% if active == key %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}" href="/{{ key }}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </aside>
+    <main class="min-w-0 flex-1">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

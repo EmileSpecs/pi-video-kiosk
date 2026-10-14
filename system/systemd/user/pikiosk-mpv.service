@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi Kiosk mpv player
+PartOf=pikiosk-session.target
+After=pikiosk-session.target
+
+[Service]
+Type=simple
+RuntimeDirectory=pi-kiosk
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/mpv --idle=yes --force-window=no --config-dir=%h/.config/mpv --input-ipc-server=%t/pi-kiosk/mpv.sock
+Restart=always
+RestartSec=2
+SyslogIdentifier=pikiosk-mpv
+
+[Install]
+WantedBy=pikiosk-session.target

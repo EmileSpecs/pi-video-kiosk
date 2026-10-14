@@ -1,0 +1,446 @@
+"""Parent admin site. Server-rendered forms that write config and hot-reload."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
+import yaml
+from aiohttp import web
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pydantic import ValidationError
+
+from pikiosk.catalog import Catalog
+from pikiosk.config import CatalogConfig, ConfigError, KioskConfig
+from pikiosk.config_store import ConfigStore
+from pikiosk.controller import Controller
+from pikiosk.web.auth import COOKIE, new_session, sign, unsign
+
+log = logging.getLogger("pikiosk.admin")
+TEMPLATES = Path(__file__).parent / "templates"
+STATIC = Path(__file__).parent / "static"
+NAV = [
+    ("status", "Status"),
+    ("connection", "Connection"),
+    ("catalog", "Catalog"),
+    ("playback", "Playback"),
+    ("screen", "Screen"),
+    ("updates", "Updates"),
+    ("offline", "Offline"),
+    ("touch", "Touch"),
+]
+
+
+def create_admin_app(
+    store: ConfigStore,
+    controller: Controller,
+    *,
+    on_saved: Callable[[], Awaitable[None]] | None = None,
+) -> web.Application:
+    env = Environment(
+        loader=FileSystemLoader(TEMPLATES),
+        autoescape=select_autoescape(["html"]),
+    )
+    app = web.Application()
+    app["store"] = store
+    app["controller"] = controller
+    app["env"] = env
+    app["on_saved"] = on_saved
+    app["failures"] = {}
+    app.router.add_get("/login", login_page)
+    app.router.add_post("/login", login_post)
+    app.router.add_post("/logout", logout)
+    app.router.add_get("/", status_page)
+    app.router.add_get("/status", status_page)
+    app.router.add_get("/connection", connection_page)
+    app.router.add_post("/connection", connection_post)
+    app.router.add_post("/connection/test", connection_test)
+    app.router.add_get("/catalog", catalog_page)
+    app.router.add_post("/catalog", catalog_post)
+    app.router.add_get("/playback", playback_page)
+    app.router.add_post("/playback", playback_post)
+    app.router.add_get("/screen", screen_page)
+    app.router.add_post("/screen", screen_post)
+    app.router.add_get("/updates", updates_page)
+    app.router.add_post("/updates", updates_post)
+    app.router.add_get("/offline", offline_page)
+    app.router.add_post("/offline", offline_post)
+    app.router.add_get("/touch", touch_page)
+    app.router.add_post("/touch", touch_post)
+    app.router.add_get("/healthz", health)
+    app.router.add_get("/admin.css", css)
+    return app
+
+
+def _session(request: web.Request) -> dict[str, Any] | None:
+    store: ConfigStore = request.app["store"]
+    token = request.cookies.get(COOKIE, "")
+    if not token:
+        return None
+    return unsign(token, store.config.admin.password or "pikiosk")
+
+
+def _require(request: web.Request) -> dict[str, Any] | web.Response:
+    session = _session(request)
+    if session is None or not session.get("ok"):
+        raise web.HTTPFound("/login")
+    return session
+
+
+def _render(
+    request: web.Request,
+    template: str,
+    session: dict[str, Any],
+    **extra: Any,
+) -> web.Response:
+    env: Environment = request.app["env"]
+    store: ConfigStore = request.app["store"]
+    controller: Controller = request.app["controller"]
+    html = env.get_template(template).render(
+        config=store.config,
+        state=controller.state,
+        csrf=session.get("csrf", ""),
+        nav=NAV,
+        active=template.replace(".html", ""),
+        error=extra.pop("error", None),
+        **extra,
+    )
+    return web.Response(text=html, content_type="text/html")
+
+
+def _check_csrf(request: web.Request, data: Any, session: dict[str, Any]) -> None:
+    if str(data.get("csrf") or "") != str(session.get("csrf") or ""):
+        raise web.HTTPForbidden(text="bad csrf")
+
+
+async def _save(request: web.Request, config: KioskConfig, secrets: dict[str, Any]) -> None:
+    store: ConfigStore = request.app["store"]
+    store.save(config, secrets)
+    callback = request.app["on_saved"]
+    if callback:
+        await callback()
+
+
+def _catalog(config: KioskConfig) -> Catalog:
+    return Catalog(
+        config.catalog_items(),
+        allowed_hosts=config.playback.allowed_hosts,
+        allow_unlisted=config.playback.allow_unlisted,
+        file_roots=config.file_roots(),
+    )
+
+
+async def login_page(request: web.Request) -> web.Response:
+    env: Environment = request.app["env"]
+    html = env.get_template("login.html").render(error=request.query.get("error"))
+    return web.Response(text=html, content_type="text/html")
+
+
+async def login_post(request: web.Request) -> web.Response:
+    store: ConfigStore = request.app["store"]
+    data = await request.post()
+    host = request.remote or "local"
+    failures: dict[str, int] = request.app["failures"]
+    if failures.get(host, 0) >= 5:
+        raise web.HTTPTooManyRequests(text="slow down")
+    if str(data.get("password") or "") != store.config.admin.password:
+        failures[host] = failures.get(host, 0) + 1
+        raise web.HTTPFound("/login?error=1")
+    failures[host] = 0
+    response = web.HTTPFound("/")
+    response.set_cookie(
+        COOKIE,
+        sign(new_session(), store.config.admin.password or "pikiosk"),
+        httponly=True,
+        samesite="Lax",
+        path="/",
+    )
+    raise response
+
+
+async def logout(request: web.Request) -> web.Response:
+    response = web.HTTPFound("/login")
+    response.del_cookie(COOKIE, path="/")
+    raise response
+
+
+async def status_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    controller: Controller = request.app["controller"]
+    return _render(request, "status.html", session, version=controller.config.device.name)
+
+
+async def connection_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "connection.html", session, notice=request.query.get("notice"))
+
+
+async def connection_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    controller: Controller = request.app["controller"]
+    device_id = str(data.get("device_id") or store.config.device.id)
+    if controller.state.mqtt_ever_connected and device_id != store.config.device.id:
+        return _render(request, "connection.html", session, error="device id is locked after the first connection")
+    secrets = dict(store.secrets)
+    password = str(data.get("password") or "")
+    if password:
+        secrets["mqtt_password"] = password
+    try:
+        config = store.config.model_copy(
+            update={
+                "device": store.config.device.model_copy(
+                    update={
+                        "id": device_id,
+                        "name": str(data.get("name") or store.config.device.name),
+                    }
+                ),
+                "mqtt": store.config.mqtt.model_copy(
+                    update={
+                        "host": str(data.get("host") or ""),
+                        "port": int(str(data.get("port") or "1883")),
+                        "username": str(data.get("username") or "") or None,
+                        "password": secrets.get("mqtt_password", ""),
+                        "base_topic": str(data.get("base_topic") or "pikiosk"),
+                        "discovery_prefix": str(data.get("discovery_prefix") or "homeassistant"),
+                        "tls": store.config.mqtt.tls.model_copy(
+                            update={"enabled": data.get("tls") == "on"}
+                        ),
+                    }
+                ),
+            }
+        )
+        config = KioskConfig.model_validate(config.model_dump())
+    except (ValidationError, ConfigError, ValueError) as exc:
+        return _render(request, "connection.html", session, error=str(exc))
+    await _save(request, config, secrets)
+    raise web.HTTPFound("/connection?notice=saved")
+
+
+async def connection_test(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    host = str(data.get("host") or "")
+    port = int(str(data.get("port") or "1883"))
+    try:
+        _reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 3)
+        writer.close()
+        await writer.wait_closed()
+        notice = "connection ok"
+    except OSError as exc:
+        notice = f"connection failed: {exc}"
+    raise web.HTTPFound(f"/connection?notice={notice}")
+
+
+async def catalog_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "catalog.html", session)
+
+
+async def catalog_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    items = [item.model_dump() for item in store.config.catalog.items]
+    action = str(data.get("action") or "add")
+    name = str(data.get("name") or "")
+    if action == "delete":
+        items = [item for item in items if item["name"] != name]
+    elif action == "move":
+        direction = -1 if data.get("direction") == "up" else 1
+        index = next((i for i, item in enumerate(items) if item["name"] == name), -1)
+        target = index + direction
+        if index >= 0 and 0 <= target < len(items):
+            items[index], items[target] = items[target], items[index]
+    else:
+        item: dict[str, Any] = {"name": name, "type": str(data.get("type") or "video")}
+        if data.get("id"):
+            item["id"] = str(data.get("id"))
+        elif data.get("url"):
+            item["url"] = str(data.get("url"))
+        elif data.get("path"):
+            item["path"] = str(data.get("path"))
+        if data.get("start"):
+            item["start"] = float(str(data.get("start")))
+        if data.get("max_items"):
+            item["max_items"] = int(str(data.get("max_items")))
+        item["shuffle"] = data.get("shuffle") == "on"
+        items = [existing for existing in items if existing["name"] != name]
+        items.append(item)
+    try:
+        catalog = CatalogConfig.model_validate({"items": items})
+        config = store.config.model_copy(update={"catalog": catalog})
+        config = KioskConfig.model_validate(config.model_dump())
+    except (ValidationError, ValueError) as exc:
+        return _render(request, "catalog.html", session, error=str(exc))
+    await _save(request, config, dict(store.secrets))
+    raise web.HTTPFound("/catalog")
+
+
+async def playback_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "playback.html", session)
+
+
+async def playback_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    try:
+        playback = store.config.playback.model_copy(
+            update={
+                "max_volume": int(str(data.get("max_volume"))),
+                "default_volume": int(str(data.get("default_volume"))),
+                "after_video": str(data.get("after_video") or "stop"),
+                "allow_unlisted": data.get("allow_unlisted") == "on",
+            }
+        )
+        config = store.config.model_copy(update={"playback": playback})
+        config = KioskConfig.model_validate(config.model_dump())
+    except (ValidationError, ValueError) as exc:
+        return _render(request, "playback.html", session, error=str(exc))
+    await _save(request, config, dict(store.secrets))
+    raise web.HTTPFound("/playback")
+
+
+async def screen_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "screen.html", session)
+
+
+async def screen_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    try:
+        screen = store.config.screen.model_copy(
+            update={
+                "default_brightness": int(str(data.get("default_brightness"))),
+                "sleep_timeout_min": int(str(data.get("sleep_timeout_min"))),
+                "rotation": int(str(data.get("rotation") or "0")),
+            }
+        )
+        config = store.config.model_copy(update={"screen": screen})
+        config = KioskConfig.model_validate(config.model_dump())
+    except (ValidationError, ValueError) as exc:
+        return _render(request, "screen.html", session, error=str(exc))
+    await _save(request, config, dict(store.secrets))
+    raise web.HTTPFound("/screen")
+
+
+async def updates_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "updates.html", session)
+
+
+async def updates_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    controller: Controller = request.app["controller"]
+    update = store.config.update.model_copy(
+        update={
+            "auto": data.get("auto") == "on",
+            "ref": str(data.get("ref") or "main"),
+            "only_when_idle": data.get("only_when_idle") == "on",
+        }
+    )
+    config = store.config.model_copy(update={"update": update})
+    await _save(request, config, dict(store.secrets))
+    if data.get("action") == "now":
+        await controller.cmd_update_app()
+    raise web.HTTPFound("/updates")
+
+
+async def offline_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "offline.html", session)
+
+
+async def offline_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    controller: Controller = request.app["controller"]
+    offline = store.config.offline.model_copy(
+        update={
+            "enabled": data.get("enabled") == "on",
+            "max_size_gb": float(str(data.get("max_size_gb") or "20")),
+            "download_window": str(data.get("download_window") or "") or None,
+            "only_offline": data.get("only_offline") == "on",
+        }
+    )
+    config = store.config.model_copy(update={"offline": offline})
+    await _save(request, config, dict(store.secrets))
+    if data.get("action") == "sync":
+        await controller.cmd_sync_offline()
+    raise web.HTTPFound("/offline")
+
+
+async def touch_page(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    return _render(request, "touch.html", session)
+
+
+async def touch_post(request: web.Request) -> web.Response:
+    session = _require(request)
+    assert isinstance(session, dict)
+    data = await request.post()
+    _check_csrf(request, data, session)
+    store: ConfigStore = request.app["store"]
+    ui = store.config.ui.model_copy(
+        update={
+            "columns": int(str(data.get("columns") or "3")),
+            "show_titles": data.get("show_titles") == "on",
+            "locked_screen": str(data.get("locked_screen") or "black"),
+        }
+    )
+    config = store.config.model_copy(update={"ui": ui})
+    await _save(request, config, dict(store.secrets))
+    raise web.HTTPFound("/touch")
+
+
+async def health(request: web.Request) -> web.Response:
+    controller: Controller = request.app["controller"]
+    ok = controller.state.mqtt_connected and controller.state.mpv_connected
+    return web.json_response(
+        {"mqtt": controller.state.mqtt_connected, "mpv": controller.state.mpv_connected},
+        status=200 if ok else 503,
+    )
+
+
+async def css(_request: web.Request) -> web.Response:
+    file = STATIC / "admin.css"
+    if not file.exists():
+        return web.Response(text="", content_type="text/css")
+    return web.Response(text=file.read_text(encoding="utf-8"), content_type="text/css")
+
+
+def dump_preview(config: KioskConfig) -> str:
+    return yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False)

@@ -1,0 +1,100 @@
+# Pi Kiosk
+
+A locked-down YouTube player for a Raspberry Pi. mpv and yt-dlp play the video. Home Assistant starts and stops it over MQTT. Parents edit the catalog, playlists, and broker settings in a small web admin on the LAN.
+
+The behaviour is specified in [docs/SPEC.md](docs/SPEC.md). On-device checks are in [docs/TESTPLAN.md](docs/TESTPLAN.md).
+
+## What you need
+
+- Raspberry Pi 5, Raspberry Pi OS Bookworm 64-bit, labwc, and SSH.
+- Either official touch display (landscape).
+- Home Assistant 2025.10 or newer, with the Mosquitto add-on. MQTT without TLS is the default.
+- The Pi and Home Assistant on the same LAN.
+
+## Install over SSH
+
+```bash
+ssh kiosk@kiosk.local 'curl -fsSL https://raw.githubusercontent.com/EmileSpecs/pi-video-kiosk/main/install.sh | sudo bash -s -- --repo https://github.com/EmileSpecs/pi-video-kiosk.git'
+```
+
+The installer clones into `/opt/pi-kiosk`, creates a virtualenv, and writes `/etc/pi-kiosk/` only when those files are missing. It prints an admin password once. Open `http://kiosk.local:8090` from a phone or laptop on the LAN, set the MQTT broker, and add videos.
+
+`--harden-ssh` is off unless you pass it, so the first password login still works.
+
+A checkout you are developing can be installed in place:
+
+```bash
+sudo ./install.sh --dev --force
+```
+
+`--force` is only for machines that are not a Pi 5 running Bookworm.
+
+## Update
+
+Manual update, same script the timer runs:
+
+```bash
+ssh kiosk@kiosk.local 'sudo -u kiosk /opt/pi-kiosk/bin/pikiosk-update.sh'
+```
+
+Automatic update is on by default. Every 15 minutes `pikiosk-update.timer` fetches `update.ref` (usually `main`). It fast-forwards only. If a video is playing or loading, it waits for the next tick. After the pull it reinstalls `requirements.lock`, restarts `pikioskd`, and checks `/healthz`. A failed check resets the checkout to the previous commit. `/etc/pi-kiosk` is never touched, so a code update does not change the approved videos.
+
+The same action is the Home Assistant button **Update app** and the admin Updates page. yt-dlp has its own daily timer.
+
+## Admin and Home Assistant
+
+The admin site is part of `pikioskd` on port 8090. It is how you set the broker, the catalog order, playback defaults, the screen, offline cache, and the touch grid. Passwords already saved are not sent back to the browser.
+
+Home Assistant is the remote control: play, pause, stop, next, previous, volume, mute, screen, sleep, and the touch-UI lock. Discovery creates those entities. `ha/packages/pikiosk.yaml` adds a universal media player and example automations. `ha/dashboards/pikiosk-card.yaml` is a Lovelace starting point. If `device.id` is not `kids_kiosk`, replace that id in both files.
+
+Useful MQTT checks from a computer with `mosquitto_sub`:
+
+```bash
+mosquitto_sub -h homeassistant.local -t 'pikiosk/#' -v
+mosquitto_pub -h homeassistant.local -t pikiosk/kids_kiosk/cmd/play_media -m XqZsoesa55w
+```
+
+## Development
+
+Python 3.10 or newer. Node is only used to compile the admin stylesheet; the Pi does not run Node.
+
+```bash
+python -m venv .venv
+.venv\Scripts\pip install -e ".[dev]"
+npm install
+npm run css
+.venv\Scripts\python.exe -m ruff check pikiosk tests
+.venv\Scripts\python.exe -m mypy
+.venv\Scripts\python.exe -m pytest
+.venv\Scripts\python.exe -m pikiosk --simulate --config config/config.example.yaml
+```
+
+On Linux, `make lint test` does the same checks. CI fails if `pikiosk/web/static/admin.css` does not match a fresh Tailwind build.
+
+`pikioskd --check-config config/config.example.yaml` exits 0. A broken file exits 2.
+
+## Layout
+
+| Path | Role |
+|---|---|
+| `/opt/pi-kiosk` | Git checkout and virtualenv |
+| `/etc/pi-kiosk/config.yaml` | Catalog and settings |
+| `/etc/pi-kiosk/secrets.yaml` | MQTT password, admin password, optional PIN |
+| `~kiosk/.local/state/pi-kiosk/state.json` | Volume, screen, and playback state |
+| `127.0.0.1:8088` | Child grid. Chromium on the panel loads only this |
+| `0.0.0.0:8090` | Parent admin |
+
+## Troubleshooting
+
+- `journalctl --user -u pikioskd -f` and `journalctl --user -u pikiosk-mpv -f`.
+- HA shows the device unavailable: the broker host in the admin Connection page, Mosquitto credentials, and that the Pi can open port 1883.
+- Video fails immediately: `sudo -u kiosk /opt/pi-kiosk/bin/update-ytdlp.sh`. A cookies file can be set in `ytdlp.cookies_file` if YouTube asks for a sign-in.
+- The panel stays on the desktop: labwc `~kiosk/.config/labwc/autostart` should start `pikiosk-session.target` and should not start the panel or file manager.
+- Screen brightness does nothing: `ls /sys/class/backlight` and confirm the `kiosk` user is in the `video` group. The installer does not hard-code `max_brightness`.
+
+## Remove
+
+```bash
+sudo ./uninstall.sh
+sudo ./uninstall.sh --purge   # also deletes /etc/pi-kiosk
+```

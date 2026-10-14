@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="space-y-4">
+  <div class="pk-card space-y-3">
+    <h1 class="text-2xl font-semibold">Approved videos</h1>
+    {% if error %}<p class="pk-alert">{{ error }}</p>{% endif %}
+    <ul class="divide-y divide-slate-200">
+      {% for item in config.catalog.items %}
+      <li class="flex items-center justify-between gap-3 py-3">
+        <div>
+          <p class="font-medium">{{ item.name }}</p>
+          <p class="text-sm text-slate-500">{{ item.type }} · {{ item.id or item.url or item.path }}</p>
+        </div>
+        <div class="flex gap-2">
+          <form method="post" action="/catalog">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="move">
+            <input type="hidden" name="name" value="{{ item.name }}">
+            <button class="rounded-lg border px-2 py-1 text-xs" name="direction" value="up" type="submit">Up</button>
+            <button class="rounded-lg border px-2 py-1 text-xs" name="direction" value="down" type="submit">Down</button>
+          </form>
+          <form method="post" action="/catalog">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="name" value="{{ item.name }}">
+            <button class="rounded-lg bg-red-50 px-2 py-1 text-xs text-red-700" type="submit">Remove</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <form method="post" action="/catalog" class="pk-card space-y-4">
+    <h2 class="text-lg font-semibold">Add item</h2>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="action" value="add">
+    <label class="pk-field">Name<input class="pk-input" name="name" required></label>
+    <label class="pk-field">Type
+      <select class="pk-input" name="type">
+        <option value="video">Video</option>
+        <option value="playlist">Playlist</option>
+        <option value="file">File</option>
+      </select>
+    </label>
+    <label class="pk-field">YouTube id<input class="pk-input" name="id"></label>
+    <label class="pk-field">URL<input class="pk-input" name="url"></label>
+    <label class="pk-field">File path<input class="pk-input" name="path"></label>
+    <div class="grid gap-4 md:grid-cols-2">
+      <label class="pk-field">Start seconds<input class="pk-input" name="start"></label>
+      <label class="pk-field">Playlist limit<input class="pk-input" name="max_items"></label>
+    </div>
+    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="shuffle"> Shuffle playlist</label>
+    <button class="pk-button" type="submit">Add</button>
+  </form>
+</section>
+{% endblock %}

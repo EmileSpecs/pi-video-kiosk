@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "css": "tailwindcss -i pikiosk/web/styles/admin.css -o pikiosk/web/static/admin.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

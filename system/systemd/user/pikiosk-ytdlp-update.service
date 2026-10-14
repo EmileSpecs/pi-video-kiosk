@@ -1,0 +1,8 @@
+[Unit]
+Description=Update yt-dlp for Pi Kiosk
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/opt/pi-kiosk/bin/update-ytdlp.sh
+SyslogIdentifier=pikiosk-ytdlp-update

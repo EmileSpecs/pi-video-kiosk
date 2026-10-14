@@ -1,0 +1,36 @@
+# Lovelace card. Paste into a dashboard, or use it as a starting point.
+# Replace kids_kiosk if device.id is different.
+type: vertical-stack
+cards:
+  - type: media-control
+    entity: media_player.kids_kiosk
+  - type: entities
+    title: Kids Kiosk
+    entities:
+      - entity: select.kids_kiosk_video
+        name: Video
+      - entity: text.kids_kiosk_play_media
+        name: Play URL or ID
+      - entity: number.kids_kiosk_volume
+        name: Volume
+      - entity: switch.kids_kiosk_mute
+        name: Mute
+      - entity: light.kids_kiosk_screen
+        name: Screen
+      - entity: switch.kids_kiosk_sleep_enabled
+        name: Screen sleep
+      - entity: number.kids_kiosk_sleep_timeout
+        name: Sleep timeout
+      - entity: select.kids_kiosk_after_video
+        name: After video
+      - entity: switch.kids_kiosk_ui_enabled
+        name: Touch UI
+      - entity: sensor.kids_kiosk_state
+      - entity: sensor.kids_kiosk_cpu_temp
+      - entity: sensor.kids_kiosk_uptime
+      - entity: sensor.kids_kiosk_ip
+      - entity: sensor.kids_kiosk_cache_used
+      - entity: button.kids_kiosk_update_app
+        name: Update app
+      - entity: button.kids_kiosk_update_ytdlp
+        name: Update yt-dlp

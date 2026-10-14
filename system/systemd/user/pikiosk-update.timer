@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the Pi Kiosk git branch for updates
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
