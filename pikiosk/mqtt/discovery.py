@@ -179,6 +179,23 @@ def build_component_payloads(
     )
     add(
         "number",
+        "brightness",
+        {
+            **_identity(config, "number", "brightness", "Brightness"),
+            "command_topic": topics.command("brightness"),
+            "state_topic": topics.screen(),
+            "value_template": "{{ (value_json.brightness | float(0) / 255 * 100) | round(0) }}",
+            "min": 1,
+            "max": 100,
+            "step": 1,
+            "mode": "slider",
+            "unit_of_measurement": "%",
+            "icon": "mdi:brightness-6",
+        },
+        player=False,
+    )
+    add(
+        "number",
         "sleep_timeout",
         {
             **_identity(config, "number", "sleep_timeout", "Sleep timeout"),

@@ -156,3 +156,24 @@ async def test_play_loads_youtube_url(tmp_path, example_config, clock) -> None:
     assert player.loads[0]["target"] == "https://www.youtube.com/watch?v=XqZsoesa55w"
     assert "googlevideo.com" not in player.loads[0]["target"]
     assert controller.state.player == PlayerState.PLAYING
+
+
+async def test_loading_reports_when_playback_never_starts(tmp_path, example_config, clock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+
+    async def hang(*_args, **_kwargs) -> None:
+        return None
+
+    player.load = hang  # type: ignore[method-assign]
+    await controller.dispatch("play_media", {"ref": "XqZsoesa55w"})
+    assert controller.state.player == PlayerState.LOADING
+    await clock.advance(60)
+    assert controller.state.player == PlayerState.ERROR
+    assert controller.state.error_detail == "playback did not start"
+
+
+async def test_brightness_slider_sets_percent(tmp_path, example_config, clock) -> None:
+    controller, _player, screen = make_controller(tmp_path, example_config, clock)
+    await controller.dispatch("set_brightness", {"percent": 40})
+    assert controller.state.brightness == 102
+    assert screen.brightness == 102

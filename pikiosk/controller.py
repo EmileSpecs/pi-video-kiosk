@@ -68,6 +68,7 @@ class Controller:
         self._pin_failures = 0
         self._pin_locked_until = 0.0
         self._mpv_log = ""
+        self._load_generation = 0
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
@@ -288,6 +289,15 @@ class Controller:
         else:
             await self.screen.turn_off()
 
+    async def cmd_set_brightness(self, percent: int) -> None:
+        percent = max(1, min(100, int(percent)))
+        level = percent_to_ha(percent)
+        self._set(replace(self.state, brightness=level))
+        if self.state.screen_on:
+            await self.screen.set_brightness(level)
+        else:
+            self.screen.brightness = level
+
     async def cmd_set_sleep_enabled(self, enabled: bool) -> None:
         self._set(replace(self.state, sleep_enabled=bool(enabled)))
         self.screen.note_activity()
@@ -422,6 +432,8 @@ class Controller:
         if playable.source == "file":
             now = replace(now, local_file=playable.path)
         self._retries = 0
+        self._load_generation += 1
+        generation = self._load_generation
         self._set(
             replace(
                 self.state,
@@ -445,6 +457,13 @@ class Controller:
             await self.player.set_loop_file(not target_is_playlist)
             await self.player.set_loop_playlist(target_is_playlist)
         await self.drain()
+        if self.state.player == PlayerState.LOADING:
+            self.clock.call_later(60, lambda: self._load_timed_out(generation))
+
+    async def _load_timed_out(self, generation: int) -> None:
+        if generation != self._load_generation or self.state.player != PlayerState.LOADING:
+            return
+        await self._on_error(self._mpv_log or "playback did not start")
 
     def _cached(self, video_id: str | None) -> str | None:
         if not video_id or self.cache_lookup is None:

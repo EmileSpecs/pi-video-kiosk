@@ -11,13 +11,6 @@ from pikiosk.player.mpv_ipc import MpvClient, MpvError
 
 log = logging.getLogger("pikiosk.player")
 
-# Separate video+audio streams come back with no playable data. Ask for one
-# MP4 that already contains both.
-MUXED_YTDL_FORMAT = (
-    "best[height<=?720][vcodec^=avc1][acodec^=mp4a]/"
-    "best[height<=?720][ext=mp4]/18/best[ext=mp4]"
-)
-
 
 class MpvPlayer:
     def __init__(
@@ -155,23 +148,19 @@ class MpvPlayer:
     ) -> None:
         target = path or url or ""
         mode = "append" if append else "replace"
-        await self._apply_headers(headers)
+        del headers
         if url and not path:
             await self.set_property("ytdl", "yes")
-        options = f"start={start}" if start else ""
         if playlist:
             items = f"1-{max_items}" if max_items else "1-50"
-            raw = f"yes-playlist=,playlist-items={items}"
-        else:
-            raw = "no-playlist="
-        # YouTube needs a JS runtime and the EJS solver. Setting this property
-        # replaces the whole list from mpv.conf, so keep the solver options here.
-        raw += ",js-runtimes=deno:/usr/local/bin/deno,remote-components=ejs:github"
-        raw += ",extractor-args=youtube:player_client=web_embedded\\,android"
-        await self.set_property("ytdl-format", MUXED_YTDL_FORMAT)
-        await self.set_property("ytdl-raw-options", raw)
-        if options:
-            await self._cmd("loadfile", target, mode, -1, options)
+            # Setting this property replaces mpv.conf, so keep the JS runtime.
+            raw = (
+                f"yes-playlist=,playlist-items={items},"
+                "js-runtimes=deno:/usr/local/bin/deno,remote-components=ejs:github"
+            )
+            await self.set_property("ytdl-raw-options", raw)
+        if start:
+            await self._cmd("loadfile", target, mode, -1, f"start={start}")
         else:
             await self._cmd("loadfile", target, mode)
         if audio_url:
