@@ -159,6 +159,87 @@ async def test_connection_test_keeps_form(tmp_path, clock) -> None:
         await client.close()
 
 
+async def test_status_json_requires_login_and_reports_playback(tmp_path, clock) -> None:
+    client, _store, controller = await _admin(tmp_path, clock)
+    try:
+        anonymous = await client.get("/status.json")
+        assert anonymous.status == 401
+        await _login(client)
+        await controller.dispatch("select", {"name": "Baby Shark"})
+        await controller.drain()
+        response = await client.get("/status.json")
+        assert response.status == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        payload = await response.json()
+        assert payload["player"] == "playing"
+        assert payload["title"] == "Baby Shark"
+        assert payload["thumbnail"] == "https://i.ytimg.com/vi/XqZsoesa55w/hqdefault.jpg"
+        assert payload["download_progress"] is None
+        assert payload["mpv_connected"] is True
+        assert payload["info"]["version"]
+        page = await (await client.get("/status")).text()
+        assert "/status.json" in page
+        assert "Baby Shark" in page
+    finally:
+        await client.close()
+
+
+async def test_catalog_edit_keeps_position_and_renames(tmp_path, clock) -> None:
+    client, store, controller = await _admin(tmp_path, clock)
+    try:
+        csrf = await _login(client)
+        page = await (await client.get("/catalog?edit=Bath%20song")).text()
+        assert "Edit “Bath song”" in page
+        assert 'name="original" value="Bath song"' in page
+        assert 'value="https://youtu.be/WRVsOCh907o"' in page
+        before = [item.name for item in store.config.catalog.items]
+        response = await client.post(
+            "/catalog",
+            data={
+                "csrf": csrf,
+                "action": "add",
+                "original": "Bath song",
+                "name": "Bath time",
+                "type": "video",
+                "id": "WRVsOCh907o",
+                "start": "5",
+                "thumbnail": "https://example.com/bath.jpg",
+            },
+            allow_redirects=False,
+        )
+        assert response.status in {302, 303}
+        after = [item.name for item in store.config.catalog.items]
+        assert after == [name if name != "Bath song" else "Bath time" for name in before]
+        edited = next(item for item in store.config.catalog.items if item.name == "Bath time")
+        assert edited.id == "WRVsOCh907o" and edited.url is None
+        assert edited.start == 5.0
+        assert edited.thumbnail == "https://example.com/bath.jpg"
+        assert "Bath time" in controller.catalog.by_name
+        # The list page shows a thumbnail per video row and confirms removal.
+        listing = await (await client.get("/catalog")).text()
+        assert 'src="https://example.com/bath.jpg"' in listing
+        assert 'src="https://i.ytimg.com/vi/XqZsoesa55w/hqdefault.jpg"' in listing
+        assert 'data-confirm="Remove “Bath time” from the kiosk?"' in listing
+    finally:
+        await client.close()
+
+
+def test_item_thumbnail_picks_sensible_picture() -> None:
+    from pikiosk.config import CatalogItemConfig
+    from pikiosk.web.admin import item_thumbnail
+
+    by_id = CatalogItemConfig(name="a", type="video", id="XqZsoesa55w")
+    by_url = CatalogItemConfig(name="b", type="video", url="https://youtu.be/WRVsOCh907o?t=3")
+    custom = CatalogItemConfig(name="c", type="playlist", id="PLabc", thumbnail="https://x/y.png")
+    playlist = CatalogItemConfig(name="d", type="playlist", id="PLabc")
+    local = CatalogItemConfig(name="e", type="file", path="/tmp/x.mp4")
+    assert item_thumbnail(by_id) == "https://i.ytimg.com/vi/XqZsoesa55w/hqdefault.jpg"
+    assert item_thumbnail(by_url) == "https://i.ytimg.com/vi/WRVsOCh907o/hqdefault.jpg"
+    assert item_thumbnail(custom) == "https://x/y.png"
+    assert item_thumbnail(playlist) is None
+    assert item_thumbnail(local) is None
+
+
 async def test_secrets_not_in_html(tmp_path, clock) -> None:
     client, _store, _controller = await _admin(tmp_path, clock)
     try:

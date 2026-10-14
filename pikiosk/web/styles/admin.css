@@ -16,7 +16,37 @@
     @apply rounded-lg border border-slate-300 px-3 py-2 text-base font-normal text-slate-900;
   }
   .pk-button {
-    @apply rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white;
+    @apply rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700;
+  }
+  .pk-button-secondary {
+    @apply rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50;
+  }
+  .pk-button-danger {
+    @apply rounded-lg bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100;
+  }
+  .pk-icon-button {
+    @apply inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-base text-slate-700 hover:bg-slate-50 disabled:opacity-40;
+  }
+  .pk-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-700;
+  }
+  .pk-chip-ok {
+    @apply bg-emerald-100 text-emerald-800;
+  }
+  .pk-chip-bad {
+    @apply bg-red-100 text-red-800;
+  }
+  .pk-chip-busy {
+    @apply bg-amber-100 text-amber-800;
+  }
+  .pk-nav-link {
+    @apply rounded-lg px-3 py-2 text-sm font-medium whitespace-nowrap text-slate-700 hover:bg-white;
+  }
+  .pk-nav-link-active {
+    @apply bg-slate-900 text-white hover:bg-slate-900;
+  }
+  .pk-thumb {
+    @apply h-14 w-24 shrink-0 overflow-hidden rounded-lg bg-slate-200 object-cover;
   }
   .pk-alert {
     @apply mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800;

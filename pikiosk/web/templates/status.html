@@ -1,39 +1,108 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="pk-card space-y-3">
-  <h1 class="text-2xl font-semibold">Status</h1>
-  <dl class="grid grid-cols-2 gap-3 text-sm">
-    <div><dt class="text-slate-500">Player</dt><dd class="font-medium">{{ state.player.value }}</dd></div>
-    <div><dt class="text-slate-500">Screen</dt><dd class="font-medium">{{ "on" if state.screen_on else "off" }}</dd></div>
-    <div><dt class="text-slate-500">MQTT</dt><dd class="font-medium">{{ "connected" if state.mqtt_connected else "offline" }}</dd></div>
-    <div><dt class="text-slate-500">mpv</dt><dd class="font-medium">{{ "connected" if state.mpv_connected else "offline" }}</dd></div>
-    {% if state.mqtt_error and not state.mqtt_connected %}
-    <div class="col-span-2"><dt class="text-slate-500">MQTT error</dt><dd class="font-medium">{{ state.mqtt_error }}</dd></div>
-    {% endif %}
-    {% if state.mpv_error and not state.mpv_connected %}
-    <div class="col-span-2"><dt class="text-slate-500">mpv error</dt><dd class="font-medium">{{ state.mpv_error }}</dd></div>
-    {% endif %}
-    <div class="col-span-2"><dt class="text-slate-500">Now</dt><dd class="font-medium">{{ state.now.title if state.now else "Idle" }}</dd></div>
-    <div class="col-span-2"><dt class="text-slate-500">Last error</dt><dd>{{ state.last_error or "—" }}</dd></div>
-    {% if state.error_detail %}
-    <div class="col-span-2"><dt class="text-slate-500">Detail</dt><dd>{{ state.error_detail }}</dd></div>
-    {% endif %}
-  </dl>
+<section class="pk-card space-y-4" id="hero">
+  <div class="flex items-start justify-between gap-3">
+    <h1 class="text-2xl font-semibold">Status</h1>
+    <div class="flex flex-wrap justify-end gap-2" aria-live="polite">
+      <span class="pk-chip" data-chip="player">Player: <b data-field="player">{{ status.player }}</b></span>
+      <span class="pk-chip" data-chip="mqtt">MQTT: <b data-field="mqtt">{{ "connected" if status.mqtt_connected else "offline" }}</b></span>
+      <span class="pk-chip" data-chip="mpv">mpv: <b data-field="mpv">{{ "connected" if status.mpv_connected else "offline" }}</b></span>
+      <span class="pk-chip" data-chip="screen">Screen: <b data-field="screen">{{ "on" if status.screen_on else "off" }}</b></span>
+    </div>
+  </div>
+  <div class="flex flex-col gap-4 sm:flex-row">
+    <div class="relative aspect-video w-full shrink-0 overflow-hidden rounded-xl bg-slate-900 sm:w-72">
+      <img class="h-full w-full object-cover" data-field="thumbnail" src="{{ status.thumbnail or '' }}" alt="" {% if not status.thumbnail %}hidden{% endif %}>
+      <div class="absolute inset-x-0 bottom-0 h-1.5 bg-slate-700/60" data-field="progress_bar" {% if status.download_progress is none %}hidden{% endif %}>
+        <div class="h-full bg-amber-400 transition-[width]" data-field="progress_fill" style="width: {{ status.download_progress or 0 }}%"></div>
+      </div>
+    </div>
+    <div class="min-w-0 flex-1 space-y-2">
+      <p class="truncate text-lg font-semibold" data-field="title">{{ status.title or "Nothing playing" }}</p>
+      <p class="text-sm text-slate-500" data-field="subtitle">{{ status.subtitle }}</p>
+      <p class="text-sm text-amber-700" data-field="download" {% if status.download_progress is none %}hidden{% endif %}>Downloading… <span data-field="download_pct">{{ status.download_progress or 0 }}</span>%</p>
+      <p class="text-sm text-red-700" data-field="error" {% if not status.last_error %}hidden{% endif %}>
+        <span data-field="last_error">{{ status.last_error or "" }}</span>
+        <span class="block text-xs text-red-600" data-field="error_detail">{{ status.error_detail or "" }}</span>
+      </p>
+      <p class="text-sm text-red-700" data-field="mqtt_error" {% if status.mqtt_connected or not status.mqtt_error %}hidden{% endif %}>MQTT: <span data-field="mqtt_error_text">{{ status.mqtt_error or "" }}</span></p>
+      <p class="text-sm text-red-700" data-field="mpv_error" {% if status.mpv_connected or not status.mpv_error %}hidden{% endif %}>mpv: <span data-field="mpv_error_text">{{ status.mpv_error or "" }}</span></p>
+      <p class="text-sm text-slate-500">Volume <span data-field="volume">{{ status.volume }}</span>%<span data-field="muted" {% if not status.muted %}hidden{% endif %}> (muted)</span></p>
+    </div>
+  </div>
 </section>
 <section class="pk-card mt-6 space-y-3">
   <h2 class="text-lg font-semibold">Device</h2>
   <dl class="grid grid-cols-2 gap-3 text-sm">
     <div><dt class="text-slate-500">Version</dt><dd class="font-medium">{{ info.version }}{% if info.commit %} <span class="font-mono text-slate-500">{{ info.commit }}</span>{% endif %}</dd></div>
-    <div><dt class="text-slate-500">yt-dlp</dt><dd class="font-medium">{{ info.ytdlp_version or "—" }}</dd></div>
-    <div><dt class="text-slate-500">Audio output</dt><dd class="font-medium">{{ info.audio_sink or "none detected" }}</dd></div>
-    <div><dt class="text-slate-500">Cache</dt><dd class="font-medium">{% if info.cache_used_gb is not none %}{{ info.cache_used_gb }} GB, {{ info.cache_items or 0 }} videos{% else %}—{% endif %}</dd></div>
+    <div><dt class="text-slate-500">yt-dlp</dt><dd class="font-medium" data-field="ytdlp_version">{{ info.ytdlp_version or "—" }}</dd></div>
+    <div><dt class="text-slate-500">Audio output</dt><dd class="font-medium" data-field="audio_sink">{{ info.audio_sink or "none detected" }}</dd></div>
+    <div><dt class="text-slate-500">Cache</dt><dd class="font-medium" data-field="cache">{% if info.cache_used_gb is not none %}{{ info.cache_used_gb }} GB, {{ info.cache_items or 0 }} videos{% else %}—{% endif %}</dd></div>
   </dl>
-  {% if info.mpv_log %}
-  <div>
+  <div data-field="mpv_log_wrap" {% if not info.mpv_log %}hidden{% endif %}>
     <p class="mb-1 text-sm text-slate-500">mpv log</p>
-    <pre class="max-h-56 overflow-auto rounded-lg bg-slate-900 p-3 text-xs leading-5 text-slate-100">{% for line in info.mpv_log %}{{ line }}
+    <pre class="max-h-56 overflow-auto rounded-lg bg-slate-900 p-3 text-xs leading-5 text-slate-100" data-field="mpv_log">{% for line in info.mpv_log %}{{ line }}
 {% endfor %}</pre>
   </div>
-  {% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+  (() => {
+    const field = (name) => document.querySelector(`[data-field="${name}"]`);
+    const chip = (name) => document.querySelector(`[data-chip="${name}"]`);
+    const tone = (el, kind) => {
+      el.classList.remove("pk-chip-ok", "pk-chip-bad", "pk-chip-busy");
+      if (kind) el.classList.add(kind);
+    };
+    const playerTone = { playing: "pk-chip-ok", paused: "pk-chip-ok", loading: "pk-chip-busy", error: "pk-chip-bad", offline: "pk-chip-bad" };
+
+    function paint(s) {
+      field("player").textContent = s.player;
+      tone(chip("player"), playerTone[s.player] || "");
+      field("mqtt").textContent = s.mqtt_connected ? "connected" : "offline";
+      tone(chip("mqtt"), s.mqtt_connected ? "pk-chip-ok" : "pk-chip-bad");
+      field("mpv").textContent = s.mpv_connected ? "connected" : "offline";
+      tone(chip("mpv"), s.mpv_connected ? "pk-chip-ok" : "pk-chip-bad");
+      field("screen").textContent = s.screen_on ? "on" : "off";
+      const img = field("thumbnail");
+      if (s.thumbnail) { if (img.getAttribute("src") !== s.thumbnail) img.src = s.thumbnail; img.hidden = false; } else { img.hidden = true; }
+      field("title").textContent = s.title || "Nothing playing";
+      field("subtitle").textContent = s.subtitle || "";
+      const downloading = s.download_progress !== null && s.download_progress !== undefined;
+      field("download").hidden = !downloading;
+      field("progress_bar").hidden = !downloading;
+      field("download_pct").textContent = s.download_progress || 0;
+      field("progress_fill").style.width = (s.download_progress || 0) + "%";
+      field("error").hidden = !s.last_error;
+      field("last_error").textContent = s.last_error || "";
+      field("error_detail").textContent = s.error_detail || "";
+      field("mqtt_error").hidden = s.mqtt_connected || !s.mqtt_error;
+      field("mqtt_error_text").textContent = s.mqtt_error || "";
+      field("mpv_error").hidden = s.mpv_connected || !s.mpv_error;
+      field("mpv_error_text").textContent = s.mpv_error || "";
+      field("volume").textContent = s.volume;
+      field("muted").hidden = !s.muted;
+      const info = s.info || {};
+      field("ytdlp_version").textContent = info.ytdlp_version || "—";
+      field("audio_sink").textContent = info.audio_sink || "none detected";
+      field("cache").textContent = info.cache_used_gb !== null && info.cache_used_gb !== undefined
+        ? `${info.cache_used_gb} GB, ${info.cache_items || 0} videos` : "—";
+      const log = info.mpv_log || [];
+      field("mpv_log_wrap").hidden = log.length === 0;
+      field("mpv_log").textContent = log.join("\n") + (log.length ? "\n" : "");
+    }
+
+    paint({{ status_json | safe }});
+
+    async function poll() {
+      try {
+        const res = await fetch("/status.json", { cache: "no-store", credentials: "same-origin" });
+        if (res.status === 401 || res.status === 403 || res.redirected) { window.location.href = "/login"; return; }
+        if (res.ok) paint(await res.json());
+      } catch (_err) { /* offline; try again */ }
+    }
+    setInterval(poll, 5000);
+  })();
+</script>
 {% endblock %}

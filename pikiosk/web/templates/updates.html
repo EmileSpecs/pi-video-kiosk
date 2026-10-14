@@ -8,7 +8,7 @@
   <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="only_when_idle" {% if config.update.only_when_idle %}checked{% endif %}> Wait until playback is idle</label>
   <div class="flex gap-2">
     <button class="pk-button" type="submit">Save</button>
-    <button class="rounded-lg border border-slate-300 px-4 py-2 text-sm" name="action" value="now" type="submit">Update now</button>
+    <button class="pk-button-secondary" name="action" value="now" type="submit">Update now</button>
   </div>
 </form>
 {% endblock %}

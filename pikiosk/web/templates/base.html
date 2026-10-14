@@ -8,12 +8,15 @@
 </head>
 <body class="min-h-screen bg-slate-100 text-slate-900">
   <div class="mx-auto flex max-w-6xl flex-col gap-6 p-4 md:flex-row md:p-8">
-    <aside class="md:w-52 md:shrink-0">
-      <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Pi Video Kiosk</p>
-      <nav class="flex gap-2 overflow-x-auto md:flex-col">
+    <aside class="md:sticky md:top-8 md:w-52 md:shrink-0 md:self-start">
+      <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ config.device.name }}</p>
+      <nav class="flex gap-1 overflow-x-auto pb-1 md:flex-col md:pb-0" aria-label="Admin pages">
         {% for key, label in nav %}
-        <a class="rounded-lg px-3 py-2 text-sm font-medium {% if active == key %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}" href="/{{ key }}">{{ label }}</a>
+        <a class="pk-nav-link{% if active == key %} pk-nav-link-active{% endif %}" {% if active == key %}aria-current="page"{% endif %} href="/{{ key }}">{{ label }}</a>
         {% endfor %}
+        <form method="post" action="/logout" class="md:mt-4 md:border-t md:border-slate-200 md:pt-4">
+          <button class="pk-nav-link w-full text-left text-slate-500" type="submit">Log out</button>
+        </form>
       </nav>
     </aside>
     <main class="min-w-0 flex-1">
@@ -24,13 +27,20 @@
   </div>
   <script>
     document.addEventListener("submit", (event) => {
+      const form = event.target;
       const button = event.submitter;
-      if (!button) return;
+      const confirmText = (button && button.dataset.confirm) || form.dataset.confirm;
+      if (confirmText && !window.confirm(confirmText)) {
+        event.preventDefault();
+        return;
+      }
+      if (!button || button.dataset.quiet !== undefined) return;
       button.setAttribute("aria-busy", "true");
       button.classList.add("pk-busy");
       const label = button.textContent.trim();
       button.textContent = label === "Save" || label === "Add" ? "Saving…" : label + "…";
     });
   </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

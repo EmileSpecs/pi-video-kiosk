@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -15,8 +16,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import ValidationError
 
 from pikiosk import __version__
-from pikiosk.catalog import Catalog
-from pikiosk.config import CatalogConfig, ConfigError, KioskConfig
+from pikiosk.catalog import Catalog, CatalogError, parse_ref, thumbnail_url
+from pikiosk.config import CatalogConfig, CatalogItemConfig, ConfigError, KioskConfig
 from pikiosk.config_store import ConfigStore
 from pikiosk.controller import Controller
 from pikiosk.diag import git_commit
@@ -60,6 +61,7 @@ def create_admin_app(
     app.router.add_post("/logout", logout)
     app.router.add_get("/", status_page)
     app.router.add_get("/status", status_page)
+    app.router.add_get("/status.json", status_json)
     app.router.add_get("/connection", connection_page)
     app.router.add_post("/connection", connection_post)
     app.router.add_post("/connection/test", connection_test)
@@ -109,6 +111,7 @@ def _render(
         state=controller.state,
         csrf=session.get("csrf", ""),
         nav=NAV,
+        thumb_for=item_thumbnail,
         active=template.replace(".html", ""),
         error=extra.pop("error", None),
         notice=extra.pop("notice", None) or request.query.get("notice"),
@@ -190,11 +193,86 @@ async def logout(request: web.Request) -> web.Response:
     raise response
 
 
+def item_thumbnail(item: CatalogItemConfig) -> str | None:
+    """Picture for a catalog row: the configured one, else YouTube's for video items."""
+    if item.thumbnail:
+        return item.thumbnail
+    if item.type != "video":
+        return None
+    if item.id:
+        return thumbnail_url(item.id)
+    if item.url:
+        try:
+            ref = parse_ref(item.url)
+        except CatalogError:
+            return None
+        if ref.kind == "video" and ref.id:
+            return thumbnail_url(ref.id)
+    return None
+
+
+def status_payload(controller: Controller, info: dict[str, Any]) -> dict[str, Any]:
+    """Everything the Status page shows, as JSON for the 5 s poll."""
+    state = controller.state
+    now = state.now
+    title = ""
+    subtitle = ""
+    if now is not None:
+        # Parents know the catalog name; mpv's media title goes underneath.
+        title = now.catalog_name or now.title
+        bits = []
+        if now.title and now.title != title:
+            bits.append(now.title)
+        if now.playlist_count:
+            bits.append(f"{(now.playlist_index or 0) + 1} of {now.playlist_count}")
+        if now.local_file:
+            bits.append("from cache")
+        subtitle = " · ".join(bits)
+    return {
+        "player": state.player.value,
+        "title": title,
+        "subtitle": subtitle,
+        "thumbnail": now.thumbnail_url if now else None,
+        "download_progress": state.download_progress if state.player.value == "loading" else None,
+        "last_error": state.last_error,
+        "error_detail": state.error_detail,
+        "volume": state.volume,
+        "muted": state.muted,
+        "screen_on": state.screen_on,
+        "mqtt_connected": state.mqtt_connected,
+        "mqtt_error": state.mqtt_error,
+        "mpv_connected": state.mpv_connected,
+        "mpv_error": state.mpv_error,
+        "info": info,
+    }
+
+
 async def status_page(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
+    controller: Controller = request.app["controller"]
     info: dict[str, Any] = request.app["info"]()
-    return _render(request, "status.html", session, info=info)
+    status = status_payload(controller, info)
+    return _render(
+        request,
+        "status.html",
+        session,
+        info=info,
+        status=status,
+        status_json=json.dumps(status).replace("</", "<\\/"),
+    )
+
+
+async def status_json(request: web.Request) -> web.Response:
+    session = _session(request)
+    if session is None or not session.get("ok"):
+        raise web.HTTPUnauthorized(text="sign in first")
+    controller: Controller = request.app["controller"]
+    info: dict[str, Any] = request.app["info"]()
+    return web.json_response(
+        status_payload(controller, info),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _connection_form(data: Any, config: KioskConfig) -> dict[str, Any]:
@@ -301,7 +379,38 @@ async def connection_test(request: web.Request) -> web.Response:
 async def catalog_page(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
-    return _render(request, "catalog.html", session)
+    store: ConfigStore = request.app["store"]
+    editing = request.query.get("edit") or None
+    form: dict[str, Any] | None = None
+    if editing:
+        match = next((item for item in store.config.catalog.items if item.name == editing), None)
+        if match is None:
+            editing = None
+        else:
+            form = match.model_dump()
+    return _render(request, "catalog.html", session, editing=editing, form=form)
+
+
+def _catalog_item_form(data: Any) -> dict[str, Any]:
+    """Build a catalog item dict from the add/edit form."""
+    item: dict[str, Any] = {
+        "name": str(data.get("name") or ""),
+        "type": str(data.get("type") or "video"),
+    }
+    if data.get("id"):
+        item["id"] = str(data.get("id")).strip()
+    elif data.get("url"):
+        item["url"] = str(data.get("url")).strip()
+    elif data.get("path"):
+        item["path"] = str(data.get("path")).strip()
+    if data.get("start"):
+        item["start"] = float(str(data.get("start")))
+    if data.get("max_items"):
+        item["max_items"] = int(str(data.get("max_items")))
+    if data.get("thumbnail"):
+        item["thumbnail"] = str(data.get("thumbnail")).strip()
+    item["shuffle"] = data.get("shuffle") == "on"
+    return item
 
 
 async def catalog_post(request: web.Request) -> web.Response:
@@ -313,6 +422,9 @@ async def catalog_post(request: web.Request) -> web.Response:
     items = [item.model_dump() for item in store.config.catalog.items]
     action = str(data.get("action") or "add")
     name = str(data.get("name") or "")
+    original = str(data.get("original") or "") or None
+    editing = original if action == "add" else None
+    form: dict[str, Any] | None = None
     if action == "delete":
         items = [item for item in items if item["name"] != name]
     elif action == "move":
@@ -322,29 +434,34 @@ async def catalog_post(request: web.Request) -> web.Response:
         if index >= 0 and 0 <= target < len(items):
             items[index], items[target] = items[target], items[index]
     else:
-        item: dict[str, Any] = {"name": name, "type": str(data.get("type") or "video")}
-        if data.get("id"):
-            item["id"] = str(data.get("id"))
-        elif data.get("url"):
-            item["url"] = str(data.get("url"))
-        elif data.get("path"):
-            item["path"] = str(data.get("path"))
-        if data.get("start"):
-            item["start"] = float(str(data.get("start")))
-        if data.get("max_items"):
-            item["max_items"] = int(str(data.get("max_items")))
-        item["shuffle"] = data.get("shuffle") == "on"
-        items = [existing for existing in items if existing["name"] != name]
-        items.append(item)
+        try:
+            form = _catalog_item_form(data)
+        except ValueError as exc:
+            return _render(
+                request, "catalog.html", session, error=f"invalid number: {exc}", editing=editing
+            )
+        index = next((i for i, item in enumerate(items) if item["name"] == original), -1)
+        if original and index >= 0:
+            # Editing keeps the row where it was; a rename must not collide.
+            items = [
+                existing
+                for i, existing in enumerate(items)
+                if i == index or existing["name"] != name
+            ]
+            index = next(i for i, item in enumerate(items) if item["name"] == original)
+            items[index] = form
+        else:
+            items = [existing for existing in items if existing["name"] != name]
+            items.append(form)
     try:
         catalog = CatalogConfig.model_validate({"items": items})
         config = store.config.model_copy(update={"catalog": catalog})
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ValueError) as exc:
-        return _render(request, "catalog.html", session, error=str(exc))
+        return _render(request, "catalog.html", session, error=str(exc), editing=editing, form=form)
     error = await _save(request, config, dict(store.secrets))
     if error:
-        return _render(request, "catalog.html", session, error=error)
+        return _render(request, "catalog.html", session, error=error, editing=editing, form=form)
     raise _done("/catalog")
 
 

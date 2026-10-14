@@ -3,53 +3,69 @@
 <section class="space-y-4">
   <div class="pk-card space-y-3">
     <h1 class="text-2xl font-semibold">Approved videos</h1>
+    {% if not config.catalog.items %}
+    <p class="text-sm text-slate-500">Nothing yet. Add a video, playlist or file below and it shows up on the kiosk right away.</p>
+    {% endif %}
     <ul class="divide-y divide-slate-200">
       {% for item in config.catalog.items %}
-      <li class="flex items-center justify-between gap-3 py-3">
-        <div>
-          <p class="font-medium">{{ item.name }}</p>
-          <p class="text-sm text-slate-500">{{ item.type }} · {{ item.id or item.url or item.path }}</p>
+      {% set thumb = thumb_for(item) %}
+      <li class="flex items-center gap-3 py-3{% if editing == item.name %} -mx-2 rounded-lg bg-amber-50 px-2{% endif %}">
+        {% if thumb %}
+        <img class="pk-thumb" src="{{ thumb }}" alt="" loading="lazy">
+        {% else %}
+        <div class="pk-thumb flex items-center justify-center text-xs font-semibold uppercase text-slate-500">{{ item.type }}</div>
+        {% endif %}
+        <div class="min-w-0 flex-1">
+          <p class="truncate font-medium">{{ item.name }}</p>
+          <p class="truncate text-sm text-slate-500"><span class="pk-chip">{{ item.type }}</span> {{ item.id or item.url or item.path }}{% if item.start %} · from {{ item.start }}s{% endif %}{% if item.max_items %} · first {{ item.max_items }}{% endif %}{% if item.shuffle %} · shuffled{% endif %}</p>
         </div>
-        <div class="flex gap-2">
-          <form method="post" action="/catalog">
+        <div class="flex shrink-0 items-center gap-1.5">
+          <form method="post" action="/catalog" class="flex gap-1.5">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="action" value="move">
             <input type="hidden" name="name" value="{{ item.name }}">
-            <button class="rounded-lg border px-2 py-1 text-xs" name="direction" value="up" type="submit">Up</button>
-            <button class="rounded-lg border px-2 py-1 text-xs" name="direction" value="down" type="submit">Down</button>
+            <button class="pk-icon-button" name="direction" value="up" type="submit" aria-label="Move {{ item.name }} up" title="Move up" data-quiet {% if loop.first %}disabled{% endif %}>&#8593;</button>
+            <button class="pk-icon-button" name="direction" value="down" type="submit" aria-label="Move {{ item.name }} down" title="Move down" data-quiet {% if loop.last %}disabled{% endif %}>&#8595;</button>
           </form>
-          <form method="post" action="/catalog">
+          <a class="pk-icon-button" href="/catalog?edit={{ item.name | urlencode }}#edit" aria-label="Edit {{ item.name }}" title="Edit">&#9998;</a>
+          <form method="post" action="/catalog" data-confirm="Remove “{{ item.name }}” from the kiosk?">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="action" value="delete">
             <input type="hidden" name="name" value="{{ item.name }}">
-            <button class="rounded-lg bg-red-50 px-2 py-1 text-xs text-red-700" type="submit">Remove</button>
+            <button class="pk-icon-button border-red-200 bg-red-50 text-red-700 hover:bg-red-100" type="submit" aria-label="Remove {{ item.name }}" title="Remove" data-quiet>&#10005;</button>
           </form>
         </div>
       </li>
       {% endfor %}
     </ul>
   </div>
-  <form method="post" action="/catalog" class="pk-card space-y-4">
-    <h2 class="text-lg font-semibold">Add item</h2>
+  {% set edit = form or {} %}
+  <form method="post" action="/catalog" class="pk-card space-y-4" id="edit">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-lg font-semibold">{% if editing %}Edit “{{ editing }}”{% else %}Add item{% endif %}</h2>
+      {% if editing %}<a class="pk-button-secondary" href="/catalog">Cancel</a>{% endif %}
+    </div>
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="action" value="add">
-    <label class="pk-field">Name<input class="pk-input" name="name" required></label>
+    {% if editing %}<input type="hidden" name="original" value="{{ editing }}">{% endif %}
+    <label class="pk-field">Name<input class="pk-input" name="name" required value="{{ edit.name or '' }}"></label>
     <label class="pk-field">Type
       <select class="pk-input" name="type">
-        <option value="video">Video</option>
-        <option value="playlist">Playlist</option>
-        <option value="file">File</option>
+        <option value="video" {% if edit.type == "video" %}selected{% endif %}>Video</option>
+        <option value="playlist" {% if edit.type == "playlist" %}selected{% endif %}>Playlist</option>
+        <option value="file" {% if edit.type == "file" %}selected{% endif %}>File</option>
       </select>
     </label>
-    <label class="pk-field">YouTube id<input class="pk-input" name="id"></label>
-    <label class="pk-field">URL<input class="pk-input" name="url"></label>
-    <label class="pk-field">File path<input class="pk-input" name="path"></label>
+    <label class="pk-field">YouTube id<input class="pk-input" name="id" value="{{ edit.id or '' }}"></label>
+    <label class="pk-field">URL<input class="pk-input" name="url" value="{{ edit.url or '' }}"></label>
+    <label class="pk-field">File path<input class="pk-input" name="path" value="{{ edit.path or '' }}"></label>
     <div class="grid gap-4 md:grid-cols-2">
-      <label class="pk-field">Start seconds<input class="pk-input" name="start"></label>
-      <label class="pk-field">Playlist limit<input class="pk-input" name="max_items"></label>
+      <label class="pk-field">Start seconds<input class="pk-input" name="start" value="{{ edit.start if edit.start is not none else '' }}"></label>
+      <label class="pk-field">Playlist limit<input class="pk-input" name="max_items" value="{{ edit.max_items if edit.max_items is not none else '' }}"></label>
     </div>
-    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="shuffle"> Shuffle playlist</label>
-    <button class="pk-button" type="submit">Add</button>
+    <label class="pk-field">Thumbnail URL (optional)<input class="pk-input" name="thumbnail" value="{{ edit.thumbnail or '' }}"></label>
+    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="shuffle" {% if edit.shuffle %}checked{% endif %}> Shuffle playlist</label>
+    <button class="pk-button" type="submit">{% if editing %}Save{% else %}Add{% endif %}</button>
   </form>
 </section>
 {% endblock %}
