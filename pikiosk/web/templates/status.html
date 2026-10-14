@@ -10,6 +10,9 @@
     {% if state.mqtt_error and not state.mqtt_connected %}
     <div class="col-span-2"><dt class="text-slate-500">MQTT error</dt><dd class="font-medium">{{ state.mqtt_error }}</dd></div>
     {% endif %}
+    {% if state.mpv_error and not state.mpv_connected %}
+    <div class="col-span-2"><dt class="text-slate-500">mpv error</dt><dd class="font-medium">{{ state.mpv_error }}</dd></div>
+    {% endif %}
     <div class="col-span-2"><dt class="text-slate-500">Now</dt><dd class="font-medium">{{ state.now.title if state.now else "Idle" }}</dd></div>
     <div class="col-span-2"><dt class="text-slate-500">Last error</dt><dd>{{ state.last_error or "—" }}</dd></div>
   </dl>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -64,6 +65,8 @@ class Controller:
         self._unlock_until = 0.0
         self._pin_failures = 0
         self._pin_locked_until = 0.0
+        self._drain_lock = asyncio.Lock()
+        self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
         self.state = store.load(base)
         self.state = replace(
@@ -118,11 +121,33 @@ class Controller:
 
     def _queue_player_event(self, event: dict[str, Any]) -> None:
         self._incoming.append(event)
+        self._kick_drain()
+
+    def _kick_drain(self) -> None:
+        task = self._drain_task
+        if task is not None and not task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._drain_task = loop.create_task(self._drain_follow())
+
+    async def _drain_follow(self) -> None:
+        try:
+            await self.drain()
+        finally:
+            if self._incoming:
+                self._drain_task = None
+                self._kick_drain()
 
     async def drain(self) -> None:
-        while self._incoming:
-            event = self._incoming.pop(0)
-            await self._on_player_event(event)
+        if self._drain_lock.locked():
+            return
+        async with self._drain_lock:
+            while self._incoming:
+                event = self._incoming.pop(0)
+                await self._on_player_event(event)
 
     def _error(self, code: str, detail: str | None = None) -> None:
         log.info("command rejected code=%s", code)
@@ -306,8 +331,14 @@ class Controller:
             self._set(replace(self.state, selected=None))
         self.bus.publish(Event("info", {"config": "reloaded"}))
 
-    async def set_mpv_connected(self, connected: bool) -> None:
-        self._set(replace(self.state, mpv_connected=connected))
+    async def set_mpv_connected(self, connected: bool, error: str | None = None) -> None:
+        self._set(
+            replace(
+                self.state,
+                mpv_connected=connected,
+                mpv_error=None if connected else error if error is not None else self.state.mpv_error,
+            )
+        )
         if connected:
             await self.player.set_volume(self.state.volume)
             await self.player.set_mute(self.state.muted)
@@ -447,7 +478,8 @@ class Controller:
             await self.set_mpv_connected(True)
             return
         if name == "pikiosk-disconnected":
-            await self.set_mpv_connected(False)
+            detail = event.get("error")
+            await self.set_mpv_connected(False, error=str(detail) if detail else None)
             return
         if name == "property-change":
             await self._on_property(str(event.get("name")), event.get("data"))

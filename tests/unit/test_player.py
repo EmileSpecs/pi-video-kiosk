@@ -85,6 +85,19 @@ async def test_cache_fallback(tmp_path, example_config, clock) -> None:
     assert any(load["target"] == str(cached) for load in player.loads)
 
 
+async def test_mpv_connect_event_updates_status(tmp_path, example_config, clock) -> None:
+    import asyncio
+
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    player.emit({"event": "pikiosk-connected"})
+    await asyncio.sleep(0)
+    assert controller.state.mpv_connected is True
+    player.emit({"event": "pikiosk-disconnected", "error": "/run/user/1001/pi-kiosk/mpv.sock: refused"})
+    await asyncio.sleep(0)
+    assert controller.state.mpv_connected is False
+    assert controller.state.mpv_error == "/run/user/1001/pi-kiosk/mpv.sock: refused"
+
+
 async def test_reconnect_reapplies_volume(tmp_path, example_config, clock) -> None:
     controller, player, _screen = make_controller(tmp_path, example_config, clock)
     await controller.dispatch("set_volume", {"volume": 25})

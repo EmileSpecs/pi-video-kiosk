@@ -46,6 +46,7 @@ class MqttBridge:
         self._task: asyncio.Task[None] | None = None
         self._pending_out: dict[str, tuple[str, bool, int]] = {}
         self._reconnect = asyncio.Event()
+        self._player_online: bool | None = None
         controller.subscribe(self._on_state)
         controller.bus.subscribe(self._on_event)
 
@@ -143,8 +144,7 @@ class MqttBridge:
         await self.publish_screen()
         await self.publish_telemetry()
         await self._publish(self.topics.status(), "online", retain=True, qos=1)
-        player = "online" if self.controller.state.mpv_connected else "offline"
-        await self._publish(self.topics.player_status(), player, retain=True, qos=1)
+        await self.publish_player_status()
         await self._flush_out()
         await self.controller.set_mqtt_connected(True)
 
@@ -178,6 +178,11 @@ class MqttBridge:
         self._last_position_at = self.clock.monotonic()
         await self._retain(self.topics.state(), payload)
 
+    async def publish_player_status(self) -> None:
+        player = "online" if self.controller.state.mpv_connected else "offline"
+        self._player_online = self.controller.state.mpv_connected
+        await self._publish(self.topics.player_status(), player, retain=True, qos=1)
+
     async def publish_screen(self) -> None:
         await self._retain(self.topics.screen(), screen_payload(self.controller.state))
 
@@ -202,10 +207,14 @@ class MqttBridge:
         for topic, (payload, retain, qos) in pending:
             await self.transport.publish(topic, payload, retain=retain, qos=qos)
 
-    def _on_state(self, _state: Any) -> None:
+    def _on_state(self, state: Any) -> None:
         loop = asyncio.get_running_loop()
         loop.create_task(self.publish_state())
         loop.create_task(self.publish_screen())
+        online = bool(getattr(state, "mpv_connected", False))
+        if online != self._player_online:
+            self._player_online = online
+            loop.create_task(self.publish_player_status())
 
     def _on_event(self, event: Event) -> None:
         payload = {"type": event.type, "data": event.data}

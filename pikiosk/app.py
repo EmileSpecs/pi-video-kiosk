@@ -32,6 +32,15 @@ from pikiosk.web.server import create_child_app
 log = logging.getLogger("pikiosk.app")
 
 
+def mpv_socket_path() -> str:
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime:
+        uid = getattr(os, "getuid", lambda: None)()
+        by_uid = Path("/run/user") / str(uid) if uid is not None else None
+        runtime = str(by_uid if by_uid is not None and by_uid.is_dir() else Path.home() / ".runtime")
+    return str(Path(runtime) / "pi-kiosk" / "mpv.sock")
+
+
 def make_catalog(config: KioskConfig) -> Catalog:
     return Catalog(
         config.catalog_items(),
@@ -68,8 +77,7 @@ class App:
             self.player: MemoryPlayer | MpvPlayer = MemoryPlayer()
             self.transport: MemoryTransport | AioTransport = MemoryTransport()
         else:
-            runtime = os.environ.get("XDG_RUNTIME_DIR") or str(Path.home() / ".runtime")
-            socket_path = str(Path(runtime) / "pi-kiosk" / "mpv.sock")
+            socket_path = mpv_socket_path()
             self.player = MpvPlayer(
                 socket_path,
                 ytdl_format=config.playback.ytdl_format,

@@ -36,6 +36,7 @@ class MpvPlayer:
         self.connected = False
         self._restart_lock = asyncio.Lock()
         self._last_restart = 0.0
+        self._down_reason: str | None = None
 
     def add_listener(self, listener: PlayerListener) -> None:
         self._listeners.append(listener)
@@ -69,9 +70,9 @@ class MpvPlayer:
             try:
                 await client.connect()
             except (OSError, MpvError) as exc:
-                log.info("mpv connect failed error=%s", exc)
+                log.warning("mpv connect failed socket=%s error=%s", self.socket_path, exc)
                 self.connected = False
-                self._emit({"event": "pikiosk-disconnected"})
+                self._emit({"event": "pikiosk-disconnected", "error": f"{self.socket_path}: {exc}"})
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 10)
                 continue
@@ -80,19 +81,29 @@ class MpvPlayer:
             delay = 0.5
             self._emit({"event": "pikiosk-connected"})
             try:
-                await self._reapply()
+                try:
+                    await self._reapply()
+                except (OSError, MpvError) as exc:
+                    log.warning("mpv reapply failed error=%s", exc)
                 while client.connected and not self._stop.is_set():
                     await asyncio.sleep(0.2)
                     if client.consecutive_timeouts >= 3:
                         await self._request_restart()
                         break
+            except (OSError, MpvError) as exc:
+                log.warning("mpv session ended error=%s", exc)
+                self._down_reason = str(exc)
             finally:
                 await client.close()
                 self.connected = False
 
     def _mark_down(self) -> None:
         self.connected = False
-        self._emit({"event": "pikiosk-disconnected"})
+        event: dict[str, Any] = {"event": "pikiosk-disconnected"}
+        if self._down_reason:
+            event["error"] = self._down_reason
+            self._down_reason = None
+        self._emit(event)
 
     async def _reapply(self) -> None:
         await self.set_volume(self.volume)
