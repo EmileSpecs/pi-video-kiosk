@@ -1,5 +1,5 @@
 [Unit]
-Description=Update Pi Kiosk from its git branch
+Description=Update Pi Video Kiosk from its git branch
 
 [Service]
 Type=oneshot

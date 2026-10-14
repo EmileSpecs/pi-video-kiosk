@@ -180,6 +180,25 @@ async def status_page(request: web.Request) -> web.Response:
     return _render(request, "status.html", session, version=controller.config.device.name)
 
 
+def _connection_form(data: Any, config: KioskConfig) -> dict[str, Any]:
+    def posted(key: str, fallback: str) -> str:
+        if key in data:
+            return str(data.get(key) or "")
+        return fallback
+
+    return {
+        "device_id": posted("device_id", config.device.id),
+        "name": posted("name", config.device.name),
+        "host": posted("host", config.mqtt.host),
+        "port": posted("port", str(config.mqtt.port)),
+        "username": posted("username", config.mqtt.username or ""),
+        "password": posted("password", ""),
+        "base_topic": posted("base_topic", config.mqtt.base_topic),
+        "discovery_prefix": posted("discovery_prefix", config.mqtt.discovery_prefix),
+        "tls": data.get("tls") == "on",
+    }
+
+
 async def connection_page(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
@@ -194,8 +213,15 @@ async def connection_post(request: web.Request) -> web.Response:
     store: ConfigStore = request.app["store"]
     controller: Controller = request.app["controller"]
     device_id = str(data.get("device_id") or store.config.device.id)
+    form = _connection_form(data, store.config)
     if controller.state.mqtt_ever_connected and device_id != store.config.device.id:
-        return _render(request, "connection.html", session, error="device id is locked after the first connection")
+        return _render(
+            request,
+            "connection.html",
+            session,
+            error="device id is locked after the first connection",
+            form=form,
+        )
     secrets = dict(store.secrets)
     password = str(data.get("password") or "")
     if password:
@@ -226,10 +252,10 @@ async def connection_post(request: web.Request) -> web.Response:
         )
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ConfigError, ValueError) as exc:
-        return _render(request, "connection.html", session, error=str(exc))
+        return _render(request, "connection.html", session, error=str(exc), form=form)
     error = await _save(request, config, secrets)
     if error:
-        return _render(request, "connection.html", session, error=error)
+        return _render(request, "connection.html", session, error=error, form=form)
     raise web.HTTPFound("/connection?notice=saved")
 
 
@@ -238,16 +264,21 @@ async def connection_test(request: web.Request) -> web.Response:
     assert isinstance(session, dict)
     data = await request.post()
     _check_csrf(request, data, session)
-    host = str(data.get("host") or "")
-    port = int(str(data.get("port") or "1883"))
+    store: ConfigStore = request.app["store"]
+    form = _connection_form(data, store.config)
+    notice = None
+    error = None
     try:
-        _reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 3)
+        port = int(form["port"] or "1883")
+        _reader, writer = await asyncio.wait_for(asyncio.open_connection(form["host"], port), 3)
         writer.close()
         await writer.wait_closed()
         notice = "connection ok"
+    except ValueError:
+        error = "port must be a number"
     except OSError as exc:
-        notice = f"connection failed: {exc}"
-    raise web.HTTPFound(f"/connection?notice={notice}")
+        error = f"connection failed: {exc}"
+    return _render(request, "connection.html", session, notice=notice, error=error, form=form)
 
 
 async def catalog_page(request: web.Request) -> web.Response:

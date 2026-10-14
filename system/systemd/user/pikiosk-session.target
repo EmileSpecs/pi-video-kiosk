@@ -1,3 +1,3 @@
 [Unit]
-Description=Pi Kiosk graphical session components
+Description=Pi Video Kiosk graphical session components
 Wants=pikiosk-mpv.service pikiosk-ui.service

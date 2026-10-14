@@ -41,4 +41,4 @@ if [[ "$PURGE" -eq 1 ]]; then
   rm -rf /etc/pi-kiosk
 fi
 
-echo "Pi Kiosk units removed. /etc/pi-kiosk was kept unless --purge was passed."
+echo "Pi Video Kiosk units removed. /etc/pi-kiosk was kept unless --purge was passed."

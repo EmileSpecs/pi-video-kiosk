@@ -1,5 +1,5 @@
 [Unit]
-Description=Pi Kiosk mpv player
+Description=Pi Video Kiosk mpv player
 PartOf=pikiosk-session.target
 After=pikiosk-session.target
 

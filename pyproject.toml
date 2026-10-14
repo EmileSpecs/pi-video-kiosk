@@ -9,7 +9,7 @@ description = "Locked-down YouTube video kiosk for Raspberry Pi, controlled from
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Pi Kiosk" }]
+authors = [{ name = "Pi Video Kiosk" }]
 dependencies = [
     "aiohttp>=3.9",
     "aiomqtt>=2.0",

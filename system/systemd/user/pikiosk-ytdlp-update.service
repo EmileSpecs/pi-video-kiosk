@@ -1,5 +1,5 @@
 [Unit]
-Description=Update yt-dlp for Pi Kiosk
+Description=Update yt-dlp for Pi Video Kiosk
 
 [Service]
 Type=oneshot

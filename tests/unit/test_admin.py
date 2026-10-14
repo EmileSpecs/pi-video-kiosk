@@ -128,6 +128,36 @@ async def test_connection_save_reports_permission_error(tmp_path, clock, monkeyp
         await client.close()
 
 
+async def test_connection_test_keeps_form(tmp_path, clock) -> None:
+    client, _store, _controller = await _admin(tmp_path, clock)
+    try:
+        csrf = await _login(client)
+        response = await client.post(
+            "/connection/test",
+            data={
+                "csrf": csrf,
+                "device_id": "kids_kiosk",
+                "name": "Living Room",
+                "host": "broker.example",
+                "port": "1883",
+                "username": "mqtt-user",
+                "password": "mqtt-pass",
+                "base_topic": "pikiosk",
+                "discovery_prefix": "homeassistant",
+            },
+            allow_redirects=False,
+        )
+        text = await response.text()
+        assert response.status == 200
+        assert "connection failed" in text
+        assert 'value="broker.example"' in text
+        assert 'value="Living Room"' in text
+        assert 'value="mqtt-user"' in text
+        assert 'value="mqtt-pass"' in text
+    finally:
+        await client.close()
+
+
 async def test_secrets_not_in_html(tmp_path, clock) -> None:
     client, _store, _controller = await _admin(tmp_path, clock)
     try:

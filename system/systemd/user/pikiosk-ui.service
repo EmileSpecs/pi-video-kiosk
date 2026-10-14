@@ -1,5 +1,5 @@
 [Unit]
-Description=Pi Kiosk touch UI (Chromium kiosk)
+Description=Pi Video Kiosk touch UI (Chromium kiosk)
 PartOf=pikiosk-session.target
 After=pikiosk-session.target pikioskd.service
 

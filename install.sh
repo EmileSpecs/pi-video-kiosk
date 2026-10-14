@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent Pi Kiosk installer. Run as root: sudo ./install.sh [options]
+# Idempotent Pi Video Kiosk installer. Run as root: sudo ./install.sh [options]
 set -euo pipefail
 
 USER_NAME=kiosk
@@ -325,7 +325,7 @@ EOF
 
 summary() {
   echo
-  echo "Pi Kiosk installed at $PREFIX"
+  echo "Pi Video Kiosk installed at $PREFIX"
   echo "Config: /etc/pi-kiosk/config.yaml"
   echo "Secrets: /etc/pi-kiosk/secrets.yaml"
   echo "Display option: $DISPLAY_KIND  rotation: $ROTATION"

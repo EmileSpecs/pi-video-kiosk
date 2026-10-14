@@ -1,5 +1,5 @@
 [Unit]
-Description=Check the Pi Kiosk git branch for updates
+Description=Check the Pi Video Kiosk git branch for updates
 
 [Timer]
 OnBootSec=5min

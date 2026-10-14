@@ -1,4 +1,4 @@
-# Pi Kiosk
+# Pi Video Kiosk
 
 A locked-down YouTube player for a Raspberry Pi. mpv and yt-dlp play the video. Home Assistant starts and stops it over MQTT. Parents edit the catalog, playlists, and broker settings in a small web admin on the LAN.
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=Pi Kiosk controller (MQTT, player control, screen)
+Description=Pi Video Kiosk controller (MQTT, player control, screen)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0

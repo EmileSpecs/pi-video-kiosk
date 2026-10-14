@@ -1,4 +1,4 @@
-# Pi Kiosk: Locked-Down YouTube Video Kiosk Controlled from Home Assistant
+# Pi Video Kiosk: Locked-Down YouTube Video Kiosk Controlled from Home Assistant
 
 **Spec version:** 1.0 (2026-10-13)
 **Audience:** the coding agent that will build this, and any human maintainer after it.
@@ -1168,7 +1168,7 @@ Steps:
 `pikioskd.service`
 ```ini
 [Unit]
-Description=Pi Kiosk controller (MQTT, player control, screen)
+Description=Pi Video Kiosk controller (MQTT, player control, screen)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -1194,7 +1194,7 @@ WantedBy=default.target
 `pikiosk-mpv.service`
 ```ini
 [Unit]
-Description=Pi Kiosk mpv player
+Description=Pi Video Kiosk mpv player
 PartOf=pikiosk-session.target
 After=pikiosk-session.target
 
@@ -1216,7 +1216,7 @@ WantedBy=pikiosk-session.target
 `pikiosk-ui.service`
 ```ini
 [Unit]
-Description=Pi Kiosk touch UI (Chromium kiosk)
+Description=Pi Video Kiosk touch UI (Chromium kiosk)
 PartOf=pikiosk-session.target
 After=pikiosk-session.target pikioskd.service
 
@@ -1236,7 +1236,7 @@ WantedBy=pikiosk-session.target
 `pikiosk-session.target`
 ```ini
 [Unit]
-Description=Pi Kiosk graphical session components
+Description=Pi Video Kiosk graphical session components
 Wants=pikiosk-mpv.service pikiosk-ui.service
 ```
 
@@ -1244,7 +1244,7 @@ Wants=pikiosk-mpv.service pikiosk-ui.service
 ```ini
 # .service
 [Unit]
-Description=Update yt-dlp for Pi Kiosk
+Description=Update yt-dlp for Pi Video Kiosk
 [Service]
 Type=oneshot
 Nice=10

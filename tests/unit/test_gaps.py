@@ -771,7 +771,8 @@ async def test_child_api_and_admin_edges(tmp_path: Path, clock: FakeClock) -> No
             data={"csrf": csrf, "host": "127.0.0.1", "port": "1"},
             allow_redirects=False,
         )
-        assert probe.status == 302
+        assert probe.status == 200
+        assert "connection failed" in await probe.text()
         now = await client.post(
             "/updates",
             data={"csrf": csrf, "auto": "on", "ref": "main", "only_when_idle": "on", "action": "now"},

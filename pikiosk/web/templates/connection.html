@@ -7,33 +7,33 @@
   <form method="post" action="/connection" class="space-y-4">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="pk-field">Device id
-      <input class="pk-input" name="device_id" value="{{ config.device.id }}" {% if state.mqtt_ever_connected %}readonly{% endif %}>
+      <input class="pk-input" name="device_id" value="{{ form.device_id if form else config.device.id }}" {% if state.mqtt_ever_connected %}readonly{% endif %}>
     </label>
     <label class="pk-field">Name
-      <input class="pk-input" name="name" value="{{ config.device.name }}">
+      <input class="pk-input" name="name" value="{{ form.name if form else config.device.name }}">
     </label>
     <div class="grid gap-4 md:grid-cols-2">
       <label class="pk-field">Broker host
-        <input class="pk-input" name="host" value="{{ config.mqtt.host }}" required>
+        <input class="pk-input" name="host" value="{{ form.host if form else config.mqtt.host }}" required>
       </label>
       <label class="pk-field">Port
-        <input class="pk-input" name="port" type="number" value="{{ config.mqtt.port }}">
+        <input class="pk-input" name="port" type="number" value="{{ form.port if form else config.mqtt.port }}">
       </label>
     </div>
     <label class="pk-field">Username
-      <input class="pk-input" name="username" value="{{ config.mqtt.username or '' }}">
+      <input class="pk-input" name="username" value="{{ form.username if form else (config.mqtt.username or '') }}">
     </label>
     <label class="pk-field">Password
-      <input class="pk-input" type="password" name="password" placeholder="{% if config.mqtt.password %}configured{% else %}not set{% endif %}" autocomplete="new-password">
+      <input class="pk-input" type="password" name="password" value="{{ form.password if form else '' }}" placeholder="{% if config.mqtt.password %}configured{% else %}not set{% endif %}" autocomplete="new-password">
     </label>
     <label class="pk-field">Base topic
-      <input class="pk-input" name="base_topic" value="{{ config.mqtt.base_topic }}">
+      <input class="pk-input" name="base_topic" value="{{ form.base_topic if form else config.mqtt.base_topic }}">
     </label>
     <label class="pk-field">Discovery prefix
-      <input class="pk-input" name="discovery_prefix" value="{{ config.mqtt.discovery_prefix }}">
+      <input class="pk-input" name="discovery_prefix" value="{{ form.discovery_prefix if form else config.mqtt.discovery_prefix }}">
     </label>
     <label class="flex items-center gap-2 text-sm">
-      <input type="checkbox" name="tls" {% if config.mqtt.tls.enabled %}checked{% endif %}> TLS
+      <input type="checkbox" name="tls" {% if (form.tls if form else config.mqtt.tls.enabled) %}checked{% endif %}> TLS
     </label>
     <div class="flex gap-2">
       <button class="pk-button" type="submit">Save</button>
