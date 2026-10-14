@@ -100,6 +100,9 @@ ensure_user() {
     useradd --create-home --shell /bin/bash "$USER_NAME"
   fi
   usermod -aG video,input,render,audio "$USER_NAME" || true
+  if getent group autologin >/dev/null 2>&1; then
+    usermod -aG autologin "$USER_NAME" || true
+  fi
   systemctl set-default graphical.target || true
   if command -v raspi-config >/dev/null 2>&1; then
     # A stub whiptail keeps an unrecognised Trixie option from stopping on a dialog.
@@ -325,7 +328,8 @@ install_units() {
   run_user daemon-reload
   run_user enable pikioskd.service pikiosk-ytdlp-update.timer pikiosk-update.timer
   if [[ "$NO_UI" -eq 0 ]]; then
-    run_user enable pikiosk-ui.service pikiosk-mpv.service
+    run_user enable --now pikiosk-mpv.service
+    run_user enable pikiosk-ui.service
   fi
   install -d /etc/systemd/journald.conf.d
   install -m 0644 "$PREFIX/system/journald/pikiosk.conf" /etc/systemd/journald.conf.d/pikiosk.conf
@@ -340,6 +344,57 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 EOF
     systemctl reload ssh || systemctl reload sshd || true
+  fi
+}
+
+configure_desktop() {
+  if [[ "$NO_UI" -eq 1 ]]; then
+    return
+  fi
+  install -d /usr/share/wayland-sessions
+  cat > /usr/share/wayland-sessions/pikiosk.desktop << EOF
+[Desktop Entry]
+Name=Pi Video Kiosk
+Comment=Locked-down video kiosk
+Exec=$PREFIX/bin/run-labwc.sh
+TryExec=labwc
+Type=Application
+DesktopNames=labwc;wlroots
+EOF
+  if [[ -d /etc/lightdm ]]; then
+    install -d /etc/lightdm/lightdm.conf.d
+    cat > /etc/lightdm/lightdm.conf.d/50-pikiosk.conf << EOF
+[Seat:*]
+autologin-user=$USER_NAME
+autologin-user-timeout=0
+autologin-session=pikiosk
+user-session=pikiosk
+EOF
+    systemctl restart lightdm || true
+  else
+    cat > /etc/systemd/system/pikiosk-labwc.service << EOF
+[Unit]
+Description=Pi Video Kiosk display
+After=systemd-user-sessions.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=$USER_NAME
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+Restart=always
+RestartSec=2
+ExecStart=$PREFIX/bin/run-labwc.sh
+
+[Install]
+WantedBy=graphical.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now pikiosk-labwc.service || true
   fi
 }
 
@@ -372,4 +427,5 @@ write_config
 install_udev_and_cursor
 install_mpv_and_labwc
 install_units
+configure_desktop
 summary

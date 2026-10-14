@@ -101,6 +101,8 @@ if [ -d "$unit_src" ]; then
     fi
   done
   systemctl --user daemon-reload || true
+  systemctl --user enable pikiosk-mpv.service || true
+  systemctl --user restart pikiosk-mpv.service || true
 fi
 
 systemctl --user restart pikioskd.service
