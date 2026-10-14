@@ -47,11 +47,13 @@ playback:
   audio_device: auto
   network_timeout_s: 30
   after_video_scope: playlist
+  upload_directory: ~/.local/share/pi-kiosk/videos
 
 screen:
   backlight_device: auto
   output_name: auto
-  rotation: 0
+  orientation: landscape   # landscape | portrait
+  flip: false              # true when the panel is mounted upside down
   default_brightness: 70
   min_brightness: 5
   blank_method: backlight

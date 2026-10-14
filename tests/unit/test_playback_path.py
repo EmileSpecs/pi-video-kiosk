@@ -315,6 +315,57 @@ async def test_playlist_downloads_first_then_appends_rest(tmp_path: Path, exampl
     assert cache.calls == ids
 
 
+async def test_next_and_previous_move_inside_the_playlist(tmp_path: Path, example_config, clock: FakeClock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    ids = ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"]
+    cache = FakeCache(downloads={video_id: _media(tmp_path, video_id) for video_id in ids + [BABY]})
+    controller.cache = cache
+    controller.ytdlp = FakeYtDlp({"PLxxxxxxxxxxxxxxxxxxxxxxxxxxxx": ids})  # type: ignore[assignment]
+    await controller.dispatch("select", {"name": "Sesame Street Songs"})
+    assert controller._append_task is not None
+    await controller._append_task
+    assert controller.state.now is not None and controller.state.now.playlist_index == 0
+
+    await controller.dispatch("next", {})
+    now = controller.state.now
+    assert now is not None and now.playlist_index == 1
+    assert now.video_id == "bbbbbbbbbbb"  # follows the file mpv moved to
+    assert now.local_file == cache.files["bbbbbbbbbbb"]
+    assert now.thumbnail_url == "https://i.ytimg.com/vi/bbbbbbbbbbb/hqdefault.jpg"
+    assert now.catalog_name == "Sesame Street Songs"
+    assert controller.state.selected == "Sesame Street Songs"  # not the next catalog entry
+
+    await controller.dispatch("previous", {})
+    now = controller.state.now
+    assert now is not None and now.playlist_index == 0 and now.video_id == "aaaaaaaaaaa"
+    assert player.prev_count == 1
+
+    # At the first item, previous leaves the playlist and steps the catalog.
+    await controller.dispatch("previous", {})
+    assert controller.state.selected == "Baby Shark"
+
+
+async def test_next_waits_for_an_item_still_downloading(tmp_path: Path, example_config, clock: FakeClock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    ids = ["aaaaaaaaaaa", "bbbbbbbbbbb"]
+    cache = FakeCache(downloads={video_id: _media(tmp_path, video_id) for video_id in ids})
+    controller.cache = cache
+    controller.ytdlp = FakeYtDlp({"PLxxxxxxxxxxxxxxxxxxxxxxxxxxxx": ids})  # type: ignore[assignment]
+    cache.block = asyncio.Event()
+    cache.files["aaaaaaaaaaa"] = cache.downloads["aaaaaaaaaaa"]  # first is a hit, second blocks
+    await controller.dispatch("select", {"name": "Sesame Street Songs"})
+    assert controller.state.player == PlayerState.PLAYING
+    await controller.dispatch("next", {})
+    assert player.next_count == 0
+    assert controller.state.selected == "Sesame Street Songs"
+    cache.block.set()
+    assert controller._append_task is not None
+    await controller._append_task
+    await controller.dispatch("next", {})
+    assert player.next_count == 1
+    assert controller.state.now is not None and controller.state.now.video_id == "bbbbbbbbbbb"
+
+
 async def test_player_error_retries_once_then_forgets(tmp_path: Path, example_config, clock: FakeClock) -> None:
     controller, player, _screen = make_controller(tmp_path, example_config, clock)
     cache = FakeCache(files={BABY: _media(tmp_path, BABY)})

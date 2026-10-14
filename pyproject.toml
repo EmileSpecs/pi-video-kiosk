@@ -31,6 +31,7 @@ dev = [
 [project.scripts]
 pikioskd = "pikiosk.__main__:main"
 pikiosk-ctl = "pikiosk.ctl:main"
+pikiosk-orient = "pikiosk.screen.orient:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

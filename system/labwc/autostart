@@ -2,4 +2,7 @@
 # Black idle screen. No panel, desktop icons, on-screen keyboard, or swayidle.
 swaybg -c '#000000' >/dev/null 2>&1 &
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_RUNTIME_DIR
+# Turn the panel to the configured orientation before mpv and Chromium open,
+# so they never flash in the wrong shape. pikioskd re-applies it on changes.
+/opt/pi-kiosk/venv/bin/pikiosk-orient >/dev/null 2>&1 || true
 systemctl --user restart pikiosk-session.target &

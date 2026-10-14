@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 
 from pikiosk.clock import Clock
 from pikiosk.config import KioskConfig
+from pikiosk.screen import orient
 from pikiosk.screen.backlight import Backlight, map_brightness
 from pikiosk.screen.output import OutputControl
 from pikiosk.state import PlayerState
@@ -15,7 +16,6 @@ from pikiosk.state import PlayerState
 log = logging.getLogger("pikiosk.screen")
 
 _IDLE_STATES = {PlayerState.IDLE, PlayerState.PAUSED, PlayerState.ERROR}
-_TRANSFORMS = {0: "normal", 90: "90", 180: "180", 270: "270"}
 
 
 class ScreenService:
@@ -43,6 +43,18 @@ class ScreenService:
         self.sleep_enabled = config.screen.sleep_enabled
         self.sleep_timeout_min = config.screen.sleep_timeout_min
         self.on_power: Callable[[bool], Awaitable[None]] | None = None
+        self.transform: str | None = None
+
+    async def apply_orientation(self) -> None:
+        """Turn the output per config.screen; remembers the transform for re-enables."""
+        try:
+            name, transform = await orient.apply(self.config, self.output)
+        except Exception:
+            log.warning("orientation apply failed", exc_info=True)
+            return
+        if name and not self.output_name:
+            self.output_name = name
+        self.transform = transform
 
     def set_player_state(self, state: PlayerState) -> None:
         self.player_state = state
@@ -79,7 +91,7 @@ class ScreenService:
         async with self._lock:
             method = self.config.screen.blank_method
             name = self.output_name or self.config.screen.output_name
-            transform = _TRANSFORMS.get(self.config.screen.rotation)
+            transform = self.transform
             if method in {"output", "both"} and name and name != "auto":
                 if on:
                     await self.output.set_on(name, True, transform)

@@ -5,18 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import yaml
-from aiohttp import web
+from aiohttp import BodyPartReader, web
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import ValidationError
 
 from pikiosk import __version__
-from pikiosk.catalog import Catalog, CatalogError, parse_ref, thumbnail_url
+from pikiosk.catalog import PLAYLIST_ID_RE, VIDEO_ID_RE, Catalog, CatalogError, parse_ref, thumbnail_url
 from pikiosk.config import CatalogConfig, CatalogItemConfig, ConfigError, KioskConfig
 from pikiosk.config_store import ConfigStore
 from pikiosk.controller import Controller
@@ -26,6 +28,9 @@ from pikiosk.web.auth import COOKIE, new_session, sign, unsign
 log = logging.getLogger("pikiosk.admin")
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
+UPLOAD_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi"}
+MAX_UPLOAD_BYTES = 4 * 1024**3
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 NAV = [
     ("status", "Status"),
     ("connection", "Connection"),
@@ -49,7 +54,9 @@ def create_admin_app(
         loader=FileSystemLoader(TEMPLATES),
         autoescape=select_autoescape(["html"]),
     )
-    app = web.Application()
+    # Uploads stream straight to disk, so the body limit only guards the
+    # ordinary forms; see _read_form.
+    app = web.Application(client_max_size=MAX_UPLOAD_BYTES)
     app["store"] = store
     app["controller"] = controller
     app["env"] = env
@@ -112,6 +119,9 @@ def _render(
         csrf=session.get("csrf", ""),
         nav=NAV,
         thumb_for=item_thumbnail,
+        is_upload=lambda item: is_uploaded(store.config, item.path),
+        upload_directory=store.config.playback.upload_directory,
+        file_roots=[*store.config.playback.file_roots, store.config.offline.directory],
         active=template.replace(".html", ""),
         error=extra.pop("error", None),
         notice=extra.pop("notice", None) or request.query.get("notice"),
@@ -391,16 +401,118 @@ async def catalog_page(request: web.Request) -> web.Response:
     return _render(request, "catalog.html", session, editing=editing, form=form)
 
 
-def _catalog_item_form(data: Any) -> dict[str, Any]:
+def upload_dir(config: KioskConfig) -> str:
+    return str(Path(config.playback.upload_directory).expanduser())
+
+
+def is_uploaded(config: KioskConfig, path: str | None) -> bool:
+    if not path:
+        return False
+    try:
+        Path(path).expanduser().resolve().relative_to(Path(upload_dir(config)).resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def safe_upload_name(filename: str) -> str:
+    """A file name we are happy to create: basename only, tame characters, known extension."""
+    # Browsers send the name raw; some clients percent-encode it.
+    base = Path(unquote(filename).replace("\\", "/")).name
+    stem = " ".join(_SAFE_NAME.sub(" ", Path(base).stem).split()).strip(" ._") or "video"
+    ext = Path(base).suffix.lower()
+    if ext not in UPLOAD_EXTENSIONS:
+        raise ValueError(f"unsupported file type {ext or '(none)'}; use " + ", ".join(sorted(UPLOAD_EXTENSIONS)))
+    return f"{stem[:80]}{ext}"
+
+
+def unique_path(folder: Path, filename: str) -> Path:
+    candidate = folder / filename
+    counter = 2
+    while candidate.exists():
+        candidate = folder / f"{Path(filename).stem}-{counter}{Path(filename).suffix}"
+        counter += 1
+    return candidate
+
+
+@dataclass
+class Upload:
+    path: Path
+    size: int = 0
+
+
+async def _store_upload(part: BodyPartReader, folder: Path) -> Upload:
+    """Stream one multipart file field to <folder>/<name>.part."""
+    filename = safe_upload_name(part.filename or "")
+    await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
+    final = unique_path(folder, filename)
+    partial = final.with_name(final.name + ".part")
+    size = 0
+    with partial.open("wb") as handle:
+        while True:
+            chunk = await part.read_chunk(256 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                raise ValueError("file is larger than 4 GB")
+            handle.write(chunk)
+    if size == 0:
+        partial.unlink(missing_ok=True)
+        raise ValueError("the uploaded file is empty")
+    partial.replace(final)
+    return Upload(final, size)
+
+
+async def _read_form(request: web.Request, folder: Path) -> tuple[dict[str, str], Upload | None]:
+    """Form fields plus the stored upload, for both urlencoded and multipart posts."""
+    if not request.content_type.startswith("multipart/"):
+        data = await request.post()
+        return {key: str(value) for key, value in data.items() if isinstance(value, str)}, None
+    fields: dict[str, str] = {}
+    upload: Upload | None = None
+    reader = await request.multipart()
+    while True:
+        part = await reader.next()
+        if part is None:
+            break
+        if not isinstance(part, BodyPartReader) or not part.name:
+            continue
+        if part.filename:
+            if part.name == "upload" and upload is None:
+                try:
+                    upload = await _store_upload(part, folder)
+                except ValueError as exc:
+                    # An empty file input still sends a part with an empty name.
+                    if part.filename:
+                        fields["_upload_error"] = str(exc)
+            else:
+                await part.release()
+            continue
+        fields[part.name] = (await part.text())[:10_000]
+    return fields, upload
+
+
+def _catalog_item_form(data: Any, upload: Upload | None = None) -> dict[str, Any]:
     """Build a catalog item dict from the add/edit form."""
     item: dict[str, Any] = {
-        "name": str(data.get("name") or ""),
+        "name": str(data.get("name") or "").strip(),
         "type": str(data.get("type") or "video"),
     }
-    if data.get("id"):
+    source = str(data.get("source") or "").strip()
+    if upload is not None:
+        item["type"] = "file"
+        item["path"] = str(upload.path)
+        if not item["name"]:
+            item["name"] = re.sub(r"-\d+$", "", upload.path.stem).replace("_", " ")[:64]
+    elif data.get("id"):
         item["id"] = str(data.get("id")).strip()
     elif data.get("url"):
         item["url"] = str(data.get("url")).strip()
+    elif source:
+        # One box for either a bare id or a link; the catalog knows the difference.
+        bare = VIDEO_ID_RE.match(source) if item["type"] == "video" else PLAYLIST_ID_RE.match(source)
+        item["id" if bare else "url"] = source
     elif data.get("path"):
         item["path"] = str(data.get("path")).strip()
     if data.get("start"):
@@ -413,19 +525,37 @@ def _catalog_item_form(data: Any) -> dict[str, Any]:
     return item
 
 
+def _delete_upload(config: KioskConfig, items: list[dict[str, Any]], path: str | None) -> None:
+    """Remove an uploaded file once no catalog item points at it."""
+    if not is_uploaded(config, path) or any(item.get("path") == path for item in items):
+        return
+    try:
+        Path(str(path)).expanduser().unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("could not delete upload path=%s error=%s", path, exc)
+
+
 async def catalog_post(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
-    data = await request.post()
-    _check_csrf(request, data, session)
     store: ConfigStore = request.app["store"]
+    folder = Path(upload_dir(store.config))
+    data, upload = await _read_form(request, folder)
+    try:
+        _check_csrf(request, data, session)
+    except web.HTTPForbidden:
+        if upload is not None:
+            upload.path.unlink(missing_ok=True)
+        raise
     items = [item.model_dump() for item in store.config.catalog.items]
     action = str(data.get("action") or "add")
     name = str(data.get("name") or "")
     original = str(data.get("original") or "") or None
     editing = original if action == "add" else None
     form: dict[str, Any] | None = None
+    removed_paths: list[str | None] = []
     if action == "delete":
+        removed_paths = [item.get("path") for item in items if item["name"] == name]
         items = [item for item in items if item["name"] != name]
     elif action == "move":
         direction = -1 if data.get("direction") == "up" else 1
@@ -434,15 +564,22 @@ async def catalog_post(request: web.Request) -> web.Response:
         if index >= 0 and 0 <= target < len(items):
             items[index], items[target] = items[target], items[index]
     else:
+        if data.get("_upload_error"):
+            return _render(request, "catalog.html", session, error=data["_upload_error"], editing=editing)
         try:
-            form = _catalog_item_form(data)
+            form = _catalog_item_form(data, upload)
         except ValueError as exc:
+            if upload is not None:
+                upload.path.unlink(missing_ok=True)
             return _render(
                 request, "catalog.html", session, error=f"invalid number: {exc}", editing=editing
             )
+        name = form["name"]
         index = next((i for i, item in enumerate(items) if item["name"] == original), -1)
         if original and index >= 0:
             # Editing keeps the row where it was; a rename must not collide.
+            if upload is not None:
+                removed_paths = [items[index].get("path")]
             items = [
                 existing
                 for i, existing in enumerate(items)
@@ -457,12 +594,34 @@ async def catalog_post(request: web.Request) -> web.Response:
         catalog = CatalogConfig.model_validate({"items": items})
         config = store.config.model_copy(update={"catalog": catalog})
         config = KioskConfig.model_validate(config.model_dump())
+        if form is not None and form.get("path"):
+            # The same check the player applies, so a bad path fails here, not on tap.
+            _catalog(config)._check_file(str(form["path"]))
     except (ValidationError, ValueError) as exc:
-        return _render(request, "catalog.html", session, error=str(exc), editing=editing, form=form)
+        if upload is not None:
+            upload.path.unlink(missing_ok=True)
+        return _render(request, "catalog.html", session, error=_friendly(exc), editing=editing, form=form)
     error = await _save(request, config, dict(store.secrets))
     if error:
+        if upload is not None:
+            upload.path.unlink(missing_ok=True)
         return _render(request, "catalog.html", session, error=error, editing=editing, form=form)
+    for path in removed_paths:
+        _delete_upload(config, items, path)
+    if upload is not None:
+        raise _done("/catalog", f"Uploaded {upload.path.name} ({upload.size / 1048576:.0f} MB).")
     raise _done("/catalog")
+
+
+def _friendly(exc: Exception) -> str:
+    """Pydantic's report is thorough; parents want the one line that matters."""
+    if isinstance(exc, ValidationError):
+        messages = []
+        for item in exc.errors():
+            text = str(item.get("msg") or "")
+            messages.append(text.removeprefix("Value error, "))
+        return "; ".join(dict.fromkeys(messages)) or str(exc)
+    return str(exc)
 
 
 async def playback_page(request: web.Request) -> web.Response:
@@ -513,7 +672,9 @@ async def screen_post(request: web.Request) -> web.Response:
             update={
                 "default_brightness": int(str(data.get("default_brightness"))),
                 "sleep_timeout_min": int(str(data.get("sleep_timeout_min"))),
-                "rotation": int(str(data.get("rotation") or "0")),
+                "orientation": str(data.get("orientation") or "landscape"),
+                "flip": data.get("flip") == "on",
+                "rotation": None,  # the page's choice wins over a hand-set transform
             }
         )
         config = store.config.model_copy(update={"screen": screen})

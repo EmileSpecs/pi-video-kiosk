@@ -5,13 +5,14 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label class="pk-field">Default brightness<input class="pk-input" type="number" name="default_brightness" value="{{ config.screen.default_brightness }}"></label>
   <label class="pk-field">Sleep timeout (minutes)<input class="pk-input" type="number" name="sleep_timeout_min" value="{{ config.screen.sleep_timeout_min }}"></label>
-  <label class="pk-field">Rotation
-    <select class="pk-input" name="rotation">
-      {% for value in [0, 90, 180, 270] %}
-      <option value="{{ value }}" {% if config.screen.rotation == value %}selected{% endif %}>{{ value }}</option>
-      {% endfor %}
+  <label class="pk-field">Orientation
+    <select class="pk-input" name="orientation">
+      <option value="landscape" {% if config.screen.orientation == "landscape" %}selected{% endif %}>Landscape (wide, best for video)</option>
+      <option value="portrait" {% if config.screen.orientation == "portrait" %}selected{% endif %}>Portrait (tall)</option>
     </select>
   </label>
+  <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="flip" {% if config.screen.flip %}checked{% endif %}> Panel is mounted upside down</label>
+  <p class="text-xs text-slate-500">The kiosk works out the turn for the attached panel: the Touch Display 2 is natively tall, the original 7" display is natively wide. Changes apply within a few seconds.</p>
   <button class="pk-button" type="submit">Save</button>
 </form>
 {% endblock %}

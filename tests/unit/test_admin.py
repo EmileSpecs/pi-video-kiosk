@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import aiohttp
 from aiohttp.test_utils import TestClient, TestServer
 
 from pikiosk.catalog import Catalog
@@ -238,6 +239,141 @@ def test_item_thumbnail_picks_sensible_picture() -> None:
     assert item_thumbnail(custom) == "https://x/y.png"
     assert item_thumbnail(playlist) is None
     assert item_thumbnail(local) is None
+
+
+async def _multipart(csrf: str, fields: dict[str, str], filename: str | None, content: bytes = b"") -> aiohttp.FormData:
+    form = aiohttp.FormData()
+    form.add_field("csrf", csrf)
+    for key, value in fields.items():
+        form.add_field(key, value)
+    if filename is not None:
+        form.add_field("upload", content, filename=filename, content_type="video/mp4")
+    return form
+
+
+async def test_upload_creates_a_file_item_and_delete_removes_it(tmp_path, clock) -> None:
+    client, store, controller = await _admin(tmp_path, clock)
+    uploads = tmp_path / "uploads"
+    store.save(
+        store.config.model_copy(
+            update={"playback": store.config.playback.model_copy(update={"upload_directory": str(uploads)})}
+        ),
+        dict(store.secrets),
+    )
+    try:
+        csrf = await _login(client)
+        payload = b"\x00\x00\x00\x18ftypmp42" + b"x" * 5000
+        form = await _multipart(csrf, {"action": "add", "type": "file", "name": ""}, "My Clip (final).MP4", payload)
+        response = await client.post("/catalog", data=form, allow_redirects=False)
+        assert response.status in {302, 303}
+        assert "Uploaded" in response.headers["Location"]
+        stored = uploads / "My Clip final.mp4"
+        assert stored.read_bytes() == payload
+        assert not list(uploads.glob("*.part"))
+        item = next(i for i in store.config.catalog.items if i.path == str(stored))
+        assert item.type == "file" and item.name == "My Clip final"
+        assert "My Clip final" in controller.catalog.by_name
+
+        # A second upload with the same name does not overwrite the first.
+        fields = {"action": "add", "type": "file", "name": "Second"}
+        form = await _multipart(csrf, fields, "My Clip (final).MP4", b"y" * 10)
+        await client.post("/catalog", data=form, allow_redirects=False)
+        assert (uploads / "My Clip final-2.mp4").read_bytes() == b"y" * 10
+
+        listing = await (await client.get("/catalog")).text()
+        assert "uploaded" in listing
+        assert "The uploaded file is deleted too." in listing
+
+        response = await client.post(
+            "/catalog", data={"csrf": csrf, "action": "delete", "name": "My Clip final"}, allow_redirects=False
+        )
+        assert response.status in {302, 303}
+        assert not stored.exists()
+        assert (uploads / "My Clip final-2.mp4").exists()
+    finally:
+        await client.close()
+
+
+async def test_upload_rejects_bad_files_and_bad_csrf(tmp_path, clock) -> None:
+    client, store, _controller = await _admin(tmp_path, clock)
+    uploads = tmp_path / "uploads"
+    store.save(
+        store.config.model_copy(
+            update={"playback": store.config.playback.model_copy(update={"upload_directory": str(uploads)})}
+        ),
+        dict(store.secrets),
+    )
+    before = store.config_path.read_text(encoding="utf-8")
+    try:
+        csrf = await _login(client)
+        form = await _multipart(csrf, {"action": "add", "type": "file", "name": "Doc"}, "notes.pdf", b"%PDF")
+        response = await client.post("/catalog", data=form)
+        assert response.status == 200
+        assert "unsupported file type .pdf" in await response.text()
+        form = await _multipart(csrf, {"action": "add", "type": "file", "name": "Empty"}, "empty.mp4", b"")
+        response = await client.post("/catalog", data=form)
+        assert "empty" in (await response.text()).lower()
+        form = await _multipart("wrong", {"action": "add", "type": "file", "name": "X"}, "x.mp4", b"data")
+        response = await client.post("/catalog", data=form)
+        assert response.status == 403
+        assert not uploads.exists() or not any(uploads.iterdir())
+        assert store.config_path.read_text(encoding="utf-8") == before
+    finally:
+        await client.close()
+
+
+async def test_source_box_accepts_id_or_link(tmp_path, clock) -> None:
+    client, store, _controller = await _admin(tmp_path, clock)
+    try:
+        csrf = await _login(client)
+        for fields in (
+            {"name": "By id", "type": "video", "source": "dQw4w9WgXcQ"},
+            {"name": "By link", "type": "video", "source": "https://youtu.be/dQw4w9WgXcQ?t=4"},
+            {"name": "List id", "type": "playlist", "source": "PLabcdefghijklmnop"},
+            {"name": "List link", "type": "playlist", "source": "https://www.youtube.com/playlist?list=PLabc"},
+        ):
+            data = {"csrf": csrf, "action": "add", **fields}
+            response = await client.post("/catalog", data=data, allow_redirects=False)
+            assert response.status in {302, 303}, fields
+        items = {item.name: item for item in store.config.catalog.items}
+        assert items["By id"].id == "dQw4w9WgXcQ" and items["By id"].url is None
+        assert items["By link"].url == "https://youtu.be/dQw4w9WgXcQ?t=4" and items["By link"].id is None
+        assert items["List id"].id == "PLabcdefghijklmnop"
+        assert items["List link"].url == "https://www.youtube.com/playlist?list=PLabc"
+        # A path outside the allowed folders is refused before it reaches the kiosk.
+        response = await client.post(
+            "/catalog",
+            data={"csrf": csrf, "action": "add", "name": "Sneaky", "type": "file", "path": "/etc/passwd"},
+        )
+        assert response.status == 200
+        assert "outside the allowed directories" in await response.text()
+    finally:
+        await client.close()
+
+
+async def test_screen_page_saves_orientation(tmp_path, clock) -> None:
+    client, store, _controller = await _admin(tmp_path, clock)
+    try:
+        csrf = await _login(client)
+        page = await (await client.get("/screen")).text()
+        assert 'name="orientation"' in page and 'name="flip"' in page
+        response = await client.post(
+            "/screen",
+            data={
+                "csrf": csrf,
+                "default_brightness": "70",
+                "sleep_timeout_min": "10",
+                "orientation": "portrait",
+                "flip": "on",
+            },
+            allow_redirects=False,
+        )
+        assert response.status in {302, 303}
+        assert store.config.screen.orientation == "portrait"
+        assert store.config.screen.flip is True
+        assert store.config.screen.rotation is None
+    finally:
+        await client.close()
 
 
 async def test_secrets_not_in_html(tmp_path, clock) -> None:

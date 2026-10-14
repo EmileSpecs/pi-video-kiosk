@@ -26,6 +26,7 @@ class MemoryPlayer:
         self.failures_left = 0
         self.playlist_count = 1
         self.playlist_index = 0
+        self.entries: list[str] = []
 
     def add_listener(self, listener: PlayerListener) -> None:
         self._listeners.append(listener)
@@ -47,7 +48,7 @@ class MemoryPlayer:
         append: bool = False,
         headers: dict[str, str] | None = None,
     ) -> None:
-        del audio_url, append
+        del audio_url
         target = path or url or ""
         self.loads.append(
             {
@@ -57,8 +58,15 @@ class MemoryPlayer:
                 "max_items": max_items,
                 "shuffle": shuffle,
                 "headers": headers,
+                "append": append,
             }
         )
+        if append:
+            # Like mpv: the queue grows, nothing else changes until playback gets there.
+            self.entries.append(target)
+            self.playlist_count = len(self.entries)
+            self.emit({"event": "property-change", "name": "playlist-count", "data": self.playlist_count})
+            return
         if self.fail_next or self.failures_left:
             self.fail_next = False
             if self.failures_left:
@@ -67,6 +75,7 @@ class MemoryPlayer:
             return
         self.playlist_count = 3 if playlist else 1
         self.playlist_index = 0
+        self.entries = [target] * self.playlist_count
         self.paused = False
         self.emit({"event": "file-loaded", "path": target})
         self.emit(
@@ -106,10 +115,20 @@ class MemoryPlayer:
         if self.playlist_index >= self.playlist_count:
             self.emit({"event": "end-file", "reason": "eof"})
         else:
-            self.emit({"event": "property-change", "name": "playlist-pos", "data": self.playlist_index})
+            self._moved()
 
     async def playlist_prev(self) -> None:
         self.prev_count += 1
+        if self.playlist_index > 0:
+            self.playlist_index -= 1
+            self._moved()
+
+    def _moved(self) -> None:
+        self.emit({"event": "property-change", "name": "playlist-pos", "data": self.playlist_index})
+        if self.playlist_index < len(self.entries):
+            target = self.entries[self.playlist_index]
+            self.emit({"event": "file-loaded", "path": target})
+            self.emit({"event": "property-change", "name": "path", "data": target})
 
     async def set_loop_file(self, enabled: bool) -> None:
         self.loop_file = enabled

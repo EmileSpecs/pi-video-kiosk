@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from pikiosk.cache.ytdlp import YtDlp, classify_error
-from pikiosk.catalog import Catalog, CatalogError, Playable, thumbnail_url
+from pikiosk.catalog import VIDEO_ID_RE, Catalog, CatalogError, Playable, thumbnail_url
 from pikiosk.clock import Clock
 from pikiosk.config import KioskConfig
 from pikiosk.events import Event, EventBus
@@ -78,6 +78,7 @@ class Controller:
         self._last_playable: Playable | None = None
         self._append_task: asyncio.Task[None] | None = None
         self._managed_queue = False
+        self._queued = 0  # playlist items mpv actually holds
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
@@ -217,26 +218,34 @@ class Controller:
         self.screen.note_activity()
 
     async def cmd_next(self) -> None:
+        """Next item in the playing playlist, else the next catalog entry."""
         await self._wake()
         current = self.state.now
-        if (
-            current
-            and current.playlist_id
-            and current.playlist_index is not None
-            and current.playlist_count is not None
-            and current.playlist_index < current.playlist_count - 1
-        ):
-            await self.player.playlist_next()
-            await self.drain()
-            return
+        if self._in_playlist() and current and current.playlist_index is not None:
+            # Without a managed queue mpv holds the whole playlist itself.
+            held = self._queued if self._managed_queue else (current.playlist_count or 1)
+            if current.playlist_index < held - 1:
+                await self.player.playlist_next()
+                await self.drain()
+                return
+            if current.playlist_count and current.playlist_index < current.playlist_count - 1:
+                # The next video is still downloading; mpv has nothing to skip to yet.
+                log.info("next: playlist item %d not downloaded yet", current.playlist_index + 2)
+                return
         await self._step_catalog(1)
 
     async def cmd_previous(self) -> None:
+        """Restart after 5 s; otherwise the previous playlist item, else the previous catalog entry."""
         await self._wake()
-        position = self.state.now.position if self.state.now else 0
+        current = self.state.now
+        position = current.position if current else 0
         if position and position > 5:
             await self.player.seek(0)
-            self._set(replace(self.state, now=replace(self.state.now, position=0) if self.state.now else None))
+            self._set(replace(self.state, now=replace(current, position=0) if current else None))
+            return
+        if self._in_playlist() and current and (current.playlist_index or 0) > 0:
+            await self.player.playlist_prev()
+            await self.drain()
             return
         await self._step_catalog(-1)
 
@@ -455,6 +464,7 @@ class Controller:
         self._last_playable = playable
         self._load_generation += 1
         self._managed_queue = False
+        self._queued = 1
         generation = self._load_generation
         self._set(
             replace(
@@ -634,6 +644,7 @@ class Controller:
             except Exception as exc:
                 log.warning("append failed id=%s error=%s", video_id, exc)
                 return
+            self._queued += 1
 
     async def _open_timed_out(self, generation: int) -> None:
         if generation != self._load_generation or self.state.player != PlayerState.LOADING:
@@ -747,15 +758,36 @@ class Controller:
             # count only says how many have arrived so far; ours is the total.
             if not self._managed_queue:
                 self._set(replace(self.state, now=replace(current, playlist_count=data)))
-        elif name == "path" and isinstance(data, str) and "v=" in data:
+        elif name == "path" and isinstance(data, str) and data:
+            await self._on_path(current, data)
+
+    async def _on_path(self, current: NowPlaying, data: str) -> None:
+        """mpv moved to another entry: keep video id, thumbnail and file in step."""
+        video_id = ""
+        local_file = current.local_file
+        if "v=" in data:
             video_id = data.split("v=")[-1].split("&")[0]
-            if len(video_id) == 11:
-                self._set(
-                    replace(
-                        self.state,
-                        now=replace(current, video_id=video_id, thumbnail_url=thumbnail_url(video_id)),
-                    )
-                )
+        elif "://" not in data:
+            # Cached files are named <video id>.<ext>.
+            local_file = data
+            video_id = Path(data).stem
+        if len(video_id) != 11 or not VIDEO_ID_RE.match(video_id):
+            if local_file != current.local_file:
+                self._set(replace(self.state, now=replace(current, local_file=local_file)))
+            return
+        if video_id == current.video_id and local_file == current.local_file:
+            return
+        thumb = current.thumbnail_url
+        if current.playlist_id or not thumb:
+            # Playlists show the current video's picture; a single video keeps
+            # whatever the catalog chose for it.
+            thumb = thumbnail_url(video_id)
+        self._set(
+            replace(
+                self.state,
+                now=replace(current, video_id=video_id, local_file=local_file, thumbnail_url=thumb),
+            )
+        )
 
     async def _on_end(self, reason: str, detail: str) -> None:
         if reason == "stop":

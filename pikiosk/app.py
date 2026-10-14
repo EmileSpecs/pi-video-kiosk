@@ -86,7 +86,7 @@ class App:
         self.catalog = make_catalog(config)
         root = backlight_root or Path("/sys/class/backlight")
         self.backlight = Backlight(discover_backlight(root, config.screen.backlight_device))
-        output = RecordingOutput() if simulate else WlrRandr()
+        output = RecordingOutput() if simulate else WlrRandr(config.screen.output_name)
         self.screen = ScreenService(config, self.backlight, output, self.clock)
         self.ytdlp: YtDlp | None = None
         self.cache: CacheManager | None = None
@@ -201,7 +201,11 @@ class App:
         await self.controller.apply_config(config, catalog)
         reconnect = self.bridge.update_config(config)
         catalog_changed = config.catalog != self.config.catalog
+        screen_changed = config.screen != self.config.screen
         self.config = config
+        self.screen.config = config
+        if screen_changed:
+            await self.screen.apply_orientation()
         if self.cache is not None:
             self.cache.update_config(config)
             if self.ytdlp is not None:
@@ -228,6 +232,8 @@ class App:
         self.notifier.ready()
         if isinstance(self.player, MpvPlayer):
             await self.player.start()
+        if not self.simulate:
+            await self.screen.apply_orientation()
         await self.bridge.start()
         await self._serve()
         heartbeat = asyncio.create_task(self._heartbeat())

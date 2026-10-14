@@ -140,6 +140,8 @@ class PlaybackConfig(BaseModel):
     network_timeout_s: int = 30
     after_video_scope: Literal["item", "playlist"] = "playlist"
     file_roots: list[str] = Field(default_factory=lambda: ["/home/kiosk/Videos"])
+    # Videos uploaded through the admin site land here; always a file root.
+    upload_directory: str = "~/.local/share/pi-kiosk/videos"
 
     @field_validator("default_volume", "max_volume")
     @classmethod
@@ -166,7 +168,14 @@ class ScreenConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     backlight_device: str = "auto"
     output_name: str = "auto"
-    rotation: Literal[0, 90, 180, 270] = 0
+    # The panel is turned so video is landscape by default; the Touch Display 2
+    # is natively portrait, the original 7" is natively landscape, and the
+    # compositor transform is worked out from whichever is attached.
+    orientation: Literal["landscape", "portrait"] = "landscape"
+    flip: bool = False  # mounted upside down
+    # Explicit compositor transform; 90/180/270 override orientation and flip.
+    # 0 or null means automatic (older configs carry rotation: 0).
+    rotation: Literal[0, 90, 180, 270] | None = None
     default_brightness: int = 70
     min_brightness: int = 5
     blank_method: Literal["backlight", "output", "both"] = "backlight"
@@ -343,6 +352,7 @@ class KioskConfig(BaseModel):
     def file_roots(self) -> list[Path]:
         roots = [Path(path) for path in self.playback.file_roots]
         roots.append(Path(self.offline.directory))
+        roots.append(Path(self.playback.upload_directory))
         return roots
 
     def catalog_items(self) -> list[dict[str, object]]:

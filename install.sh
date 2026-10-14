@@ -4,7 +4,8 @@ set -euo pipefail
 
 USER_NAME=kiosk
 DISPLAY_KIND=auto
-ROTATION=0
+ORIENTATION=landscape
+ROTATION=""
 NO_UI=0
 HW_WATCHDOG=0
 OFFLINE=0
@@ -20,7 +21,8 @@ usage() {
 Usage: sudo ./install.sh [options]
   --user NAME          Unix user (default: kiosk)
   --display auto|td2|legacy7
-  --rotation 0|90|180|270
+  --orientation landscape|portrait   (default: landscape)
+  --rotation 0|90|180|270            Fixed compositor transform instead of orientation
   --no-ui              Do not enable the Chromium kiosk
   --hw-watchdog        Set RuntimeWatchdogSec=15
   --offline            Enable the offline cache in a new config
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
     --display) DISPLAY_KIND=$2; shift 2 ;;
+    --orientation) ORIENTATION=$2; shift 2 ;;
     --rotation) ROTATION=$2; shift 2 ;;
     --no-ui) NO_UI=1; shift ;;
     --hw-watchdog) HW_WATCHDOG=1; shift ;;
@@ -201,13 +204,25 @@ text = text.replace("repo: null", f"repo: {sys.argv[1]}", 1)
 path.write_text(text, encoding="utf-8")
 PY
     fi
-    if [[ "$ROTATION" != "0" ]]; then
+    if [[ "$ORIENTATION" != "landscape" ]]; then
+      "$PREFIX/venv/bin/python" - "$ORIENTATION" <<'PY'
+import sys
+from pathlib import Path
+path = Path("/etc/pi-kiosk/config.yaml")
+text = path.read_text(encoding="utf-8")
+path.write_text(text.replace("orientation: landscape", f"orientation: {sys.argv[1]}", 1), encoding="utf-8")
+PY
+    fi
+    if [[ -n "$ROTATION" ]]; then
       "$PREFIX/venv/bin/python" - "$ROTATION" <<'PY'
 import sys
 from pathlib import Path
 path = Path("/etc/pi-kiosk/config.yaml")
 text = path.read_text(encoding="utf-8")
-path.write_text(text.replace("rotation: 0", f"rotation: {sys.argv[1]}", 1), encoding="utf-8")
+marker = "  flip: false"
+if marker in text:
+    text = text.replace(marker, f"{marker}\n  rotation: {sys.argv[1]}", 1)
+path.write_text(text, encoding="utf-8")
 PY
     fi
     if [[ "$DISPLAY_KIND" == "legacy7" ]]; then
@@ -306,6 +321,9 @@ install_mpv_and_labwc() {
   fi
   install -d -o "$USER_NAME" -g "$USER_NAME" "$home/.config/labwc"
   install -m 0755 -o "$USER_NAME" -g "$USER_NAME" "$PREFIX/system/labwc/autostart" "$home/.config/labwc/autostart"
+  if [[ "$PREFIX" != "/opt/pi-kiosk" ]]; then
+    sed -i "s#/opt/pi-kiosk#$PREFIX#g" "$home/.config/labwc/autostart"
+  fi
   install -m 0644 -o "$USER_NAME" -g "$USER_NAME" "$PREFIX/system/labwc/environment" "$home/.config/labwc/environment"
   rc="$home/.config/labwc/rc.xml"
   if [[ -f "$rc" ]]; then
@@ -487,7 +505,7 @@ summary() {
   echo "Pi Video Kiosk installed at $PREFIX"
   echo "Config: /etc/pi-kiosk/config.yaml"
   echo "Secrets: /etc/pi-kiosk/secrets.yaml"
-  echo "Display option: $DISPLAY_KIND  rotation: $ROTATION"
+  echo "Display option: $DISPLAY_KIND  orientation: ${ROTATION:+transform $ROTATION}${ROTATION:-$ORIENTATION}"
   if [[ -d /sys/class/backlight ]]; then
     echo "Backlight devices: $(ls /sys/class/backlight | tr '\n' ' ')"
   fi

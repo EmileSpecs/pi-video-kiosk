@@ -17,7 +17,7 @@
         {% endif %}
         <div class="min-w-0 flex-1">
           <p class="truncate font-medium">{{ item.name }}</p>
-          <p class="truncate text-sm text-slate-500"><span class="pk-chip">{{ item.type }}</span> {{ item.id or item.url or item.path }}{% if item.start %} · from {{ item.start }}s{% endif %}{% if item.max_items %} · first {{ item.max_items }}{% endif %}{% if item.shuffle %} · shuffled{% endif %}</p>
+          <p class="truncate text-sm text-slate-500"><span class="pk-chip">{{ "uploaded" if is_upload(item) else item.type }}</span> {{ item.id or item.url or item.path }}{% if item.start %} · from {{ item.start }}s{% endif %}{% if item.max_items %} · first {{ item.max_items }}{% endif %}{% if item.shuffle %} · shuffled{% endif %}</p>
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
           <form method="post" action="/catalog" class="flex gap-1.5">
@@ -28,7 +28,7 @@
             <button class="pk-icon-button" name="direction" value="down" type="submit" aria-label="Move {{ item.name }} down" title="Move down" data-quiet {% if loop.last %}disabled{% endif %}>&#8595;</button>
           </form>
           <a class="pk-icon-button" href="/catalog?edit={{ item.name | urlencode }}#edit" aria-label="Edit {{ item.name }}" title="Edit">&#9998;</a>
-          <form method="post" action="/catalog" data-confirm="Remove “{{ item.name }}” from the kiosk?">
+          <form method="post" action="/catalog" data-confirm="Remove “{{ item.name }}” from the kiosk?{% if is_upload(item) %} The uploaded file is deleted too.{% endif %}">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="action" value="delete">
             <input type="hidden" name="name" value="{{ item.name }}">
@@ -40,7 +40,8 @@
     </ul>
   </div>
   {% set edit = form or {} %}
-  <form method="post" action="/catalog" class="pk-card space-y-4" id="edit">
+  {% set kind = edit.type or "video" %}
+  <form method="post" action="/catalog" enctype="multipart/form-data" class="pk-card space-y-4" id="edit" data-item-form>
     <div class="flex items-center justify-between gap-3">
       <h2 class="text-lg font-semibold">{% if editing %}Edit “{{ editing }}”{% else %}Add item{% endif %}</h2>
       {% if editing %}<a class="pk-button-secondary" href="/catalog">Cancel</a>{% endif %}
@@ -48,24 +49,82 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="action" value="add">
     {% if editing %}<input type="hidden" name="original" value="{{ editing }}">{% endif %}
-    <label class="pk-field">Name<input class="pk-input" name="name" required value="{{ edit.name or '' }}"></label>
     <label class="pk-field">Type
-      <select class="pk-input" name="type">
-        <option value="video" {% if edit.type == "video" %}selected{% endif %}>Video</option>
-        <option value="playlist" {% if edit.type == "playlist" %}selected{% endif %}>Playlist</option>
-        <option value="file" {% if edit.type == "file" %}selected{% endif %}>File</option>
+      <select class="pk-input" name="type" data-type>
+        <option value="video" {% if kind == "video" %}selected{% endif %}>YouTube video</option>
+        <option value="playlist" {% if kind == "playlist" %}selected{% endif %}>YouTube playlist</option>
+        <option value="file" {% if kind == "file" %}selected{% endif %}>Video file</option>
       </select>
     </label>
-    <label class="pk-field">YouTube id<input class="pk-input" name="id" value="{{ edit.id or '' }}"></label>
-    <label class="pk-field">URL<input class="pk-input" name="url" value="{{ edit.url or '' }}"></label>
-    <label class="pk-field">File path<input class="pk-input" name="path" value="{{ edit.path or '' }}"></label>
-    <div class="grid gap-4 md:grid-cols-2">
-      <label class="pk-field">Start seconds<input class="pk-input" name="start" value="{{ edit.start if edit.start is not none else '' }}"></label>
-      <label class="pk-field">Playlist limit<input class="pk-input" name="max_items" value="{{ edit.max_items if edit.max_items is not none else '' }}"></label>
+    <label class="pk-field" data-for="video playlist">
+      <span data-label-video>YouTube link or video id</span><span data-label-playlist hidden>YouTube playlist link or id</span>
+      <input class="pk-input" name="source" value="{{ edit.id or edit.url or '' }}" placeholder="https://youtu.be/… or the 11-character id" autocomplete="off">
+    </label>
+    <div class="space-y-3" data-for="file">
+      <label class="pk-field">Upload a video
+        <input class="pk-input" type="file" name="upload" accept="video/*,.mkv,.mp4,.webm,.mov,.m4v,.avi" data-upload>
+        <span class="text-xs font-normal text-slate-500">MP4, MKV, WebM, MOV, M4V or AVI. Stored on the kiosk under {{ upload_directory }}.</span>
+      </label>
+      <label class="pk-field">…or a path already on the kiosk
+        <input class="pk-input" name="path" value="{{ edit.path or '' }}" placeholder="/media/usb/clip.mp4" data-path>
+        <span class="text-xs font-normal text-slate-500">Allowed folders: {{ file_roots | join(", ") }}</span>
+      </label>
     </div>
-    <label class="pk-field">Thumbnail URL (optional)<input class="pk-input" name="thumbnail" value="{{ edit.thumbnail or '' }}"></label>
-    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="shuffle" {% if edit.shuffle %}checked{% endif %}> Shuffle playlist</label>
-    <button class="pk-button" type="submit">{% if editing %}Save{% else %}Add{% endif %}</button>
+    <label class="pk-field">Name<input class="pk-input" name="name" value="{{ edit.name or '' }}" placeholder="What the kiosk shows for it" data-name required></label>
+    <div class="grid gap-4 md:grid-cols-2">
+      <label class="pk-field" data-for="video file">Start at (seconds)<input class="pk-input" type="number" min="0" step="1" name="start" value="{{ (edit.start | int) if edit.start else '' }}"></label>
+      <label class="pk-field" data-for="playlist">Only the first … videos<input class="pk-input" type="number" min="1" max="500" name="max_items" value="{{ edit.max_items or '' }}" placeholder="50"></label>
+    </div>
+    <label class="flex items-center gap-2 text-sm" data-for="playlist"><input type="checkbox" name="shuffle" {% if edit.shuffle %}checked{% endif %}> Shuffle the playlist</label>
+    <details class="text-sm" {% if edit.thumbnail %}open{% endif %}>
+      <summary class="cursor-pointer text-slate-600">Custom picture</summary>
+      <label class="pk-field mt-2">Thumbnail URL<input class="pk-input" name="thumbnail" value="{{ edit.thumbnail or '' }}" placeholder="https://…/picture.jpg"></label>
+    </details>
+    <div class="flex items-center gap-3">
+      <button class="pk-button" type="submit" data-submit>{% if editing %}Save{% else %}Add{% endif %}</button>
+      <span class="text-sm text-slate-500" data-progress hidden></span>
+    </div>
   </form>
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+  (() => {
+    const form = document.querySelector("[data-item-form]");
+    const type = form.querySelector("[data-type]");
+    const upload = form.querySelector("[data-upload]");
+    const path = form.querySelector("[data-path]");
+    const name = form.querySelector("[data-name]");
+    const progress = form.querySelector("[data-progress]");
+
+    function show() {
+      const kind = type.value;
+      form.querySelectorAll("[data-for]").forEach((el) => {
+        const visible = el.dataset.for.split(" ").includes(kind);
+        el.hidden = !visible;
+        el.querySelectorAll("input").forEach((input) => { input.disabled = !visible; });
+      });
+      form.querySelector("[data-label-video]").hidden = kind !== "video";
+      form.querySelector("[data-label-playlist]").hidden = kind !== "playlist";
+    }
+    type.addEventListener("change", show);
+    show();
+
+    upload.addEventListener("change", () => {
+      const file = upload.files && upload.files[0];
+      if (!file) return;
+      if (!name.value) name.value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").slice(0, 64);
+      path.placeholder = "not needed when uploading";
+    });
+
+    // Big files take a while over Wi-Fi; show that something is happening.
+    form.addEventListener("submit", () => {
+      const file = upload.files && upload.files[0];
+      if (!file || upload.disabled) return;
+      const mb = (file.size / 1048576).toFixed(0);
+      progress.hidden = false;
+      progress.textContent = `Uploading ${mb} MB… keep this page open.`;
+    });
+  })();
+</script>
 {% endblock %}
