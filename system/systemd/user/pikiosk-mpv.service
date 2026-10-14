@@ -6,7 +6,8 @@ PartOf=pikiosk-session.target
 Type=simple
 RuntimeDirectory=pi-kiosk
 RuntimeDirectoryPreserve=yes
-ExecStart=/usr/bin/mpv --idle=yes --force-window=no --config-dir=%h/.config/mpv --input-ipc-server=%t/pi-kiosk/mpv.sock
+ExecStartPre=/bin/mkdir -p %h/.cache/pi-kiosk
+ExecStart=/usr/bin/mpv --idle=yes --force-window=no --config-dir=%h/.config/mpv --input-ipc-server=%t/pi-kiosk/mpv.sock --log-file=%h/.cache/pi-kiosk/mpv.log
 Restart=always
 RestartSec=2
 SyslogIdentifier=pikiosk-mpv

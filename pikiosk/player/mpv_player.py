@@ -82,7 +82,7 @@ class MpvPlayer:
             self._emit({"event": "pikiosk-connected"})
             try:
                 try:
-                    await client.command("request_log_messages", "error")
+                    await client.command("request_log_messages", "warn")
                 except (OSError, MpvError):
                     pass
                 try:

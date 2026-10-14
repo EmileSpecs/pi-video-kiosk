@@ -20,4 +20,20 @@
     {% endif %}
   </dl>
 </section>
+<section class="pk-card mt-6 space-y-3">
+  <h2 class="text-lg font-semibold">Device</h2>
+  <dl class="grid grid-cols-2 gap-3 text-sm">
+    <div><dt class="text-slate-500">Version</dt><dd class="font-medium">{{ info.version }}{% if info.commit %} <span class="font-mono text-slate-500">{{ info.commit }}</span>{% endif %}</dd></div>
+    <div><dt class="text-slate-500">yt-dlp</dt><dd class="font-medium">{{ info.ytdlp_version or "—" }}</dd></div>
+    <div><dt class="text-slate-500">Audio output</dt><dd class="font-medium">{{ info.audio_sink or "none detected" }}</dd></div>
+    <div><dt class="text-slate-500">Cache</dt><dd class="font-medium">{% if info.cache_used_gb is not none %}{{ info.cache_used_gb }} GB, {{ info.cache_items or 0 }} videos{% else %}—{% endif %}</dd></div>
+  </dl>
+  {% if info.mpv_log %}
+  <div>
+    <p class="mb-1 text-sm text-slate-500">mpv log</p>
+    <pre class="max-h-56 overflow-auto rounded-lg bg-slate-900 p-3 text-xs leading-5 text-slate-100">{% for line in info.mpv_log %}{{ line }}
+{% endfor %}</pre>
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

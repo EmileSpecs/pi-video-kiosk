@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from pikiosk.cache.ytdlp import stream_pair
+from pikiosk.cache.ytdlp import ResolvedStream, stream_pair
 from pikiosk.state import PlayerState
 from tests.conftest import make_controller
 

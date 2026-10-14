@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
@@ -69,6 +70,7 @@ class Controller:
         self._pin_failures = 0
         self._pin_locked_until = 0.0
         self._mpv_log = ""
+        self._mpv_log_lines: deque[str] = deque(maxlen=10)
         self._load_generation = 0
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
@@ -399,6 +401,10 @@ class Controller:
     def temporarily_unlocked(self) -> bool:
         return self.clock.monotonic() < self._unlock_until
 
+    def mpv_log_tail(self) -> list[str]:
+        """Last warnings and errors mpv reported over IPC, oldest first."""
+        return list(self._mpv_log_lines)
+
     async def _wake(self) -> None:
         if not self.state.screen_on:
             await self.screen.turn_on(self.state.brightness)
@@ -533,7 +539,11 @@ class Controller:
         if name == "log-message":
             text = " ".join(str(event.get("text") or "").split())
             if text:
-                self._mpv_log = text[:300]
+                level = str(event.get("level") or "")
+                prefix = str(event.get("prefix") or "")
+                self._mpv_log_lines.append(f"[{level}] {prefix}: {text}"[:300] if prefix else text[:300])
+                if level in {"", "error", "fatal"}:
+                    self._mpv_log = text[:300]
             return
         if name == "property-change":
             await self._on_property(str(event.get("name")), event.get("data"))

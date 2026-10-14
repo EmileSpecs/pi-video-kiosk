@@ -100,6 +100,12 @@ ensure_user() {
     useradd --create-home --shell /bin/bash "$USER_NAME"
   fi
   usermod -aG video,input,render,audio "$USER_NAME" || true
+  # Without these, journalctl --user shows "No journal files were found".
+  for group in systemd-journal adm; do
+    if getent group "$group" >/dev/null 2>&1; then
+      usermod -aG "$group" "$USER_NAME" || true
+    fi
+  done
   if getent group autologin >/dev/null 2>&1; then
     usermod -aG autologin "$USER_NAME" || true
   fi
@@ -261,6 +267,10 @@ EOF
   chmod 0440 /etc/sudoers.d/pikiosk
   install -d -o "$USER_NAME" -g "$USER_NAME" -m 0700 "/home/$USER_NAME/.local/state/pi-kiosk"
   install -d -o "$USER_NAME" -g "$USER_NAME" -m 0700 "/home/$USER_NAME/.cache/pi-kiosk/videos"
+  # pikioskd writes ~/.cache/pi-kiosk/pikioskd.log when logging.file is null,
+  # and mpv writes mpv.log beside it, so a device with an empty user journal
+  # still has something to read.
+  chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.cache/pi-kiosk"
 }
 
 install_udev_and_cursor() {
@@ -476,7 +486,8 @@ summary() {
   if [[ -d /sys/class/backlight ]]; then
     echo "Backlight devices: $(ls /sys/class/backlight | tr '\n' ' ')"
   fi
-  echo "Logs: journalctl --user -u pikioskd -f"
+  echo "Logs: journalctl --user -u pikioskd -f  (or ~$USER_NAME/.cache/pi-kiosk/pikioskd.log)"
+  echo "Diagnostics: sudo -u $USER_NAME $PREFIX/bin/pikiosk-diag"
   echo "Manual update: sudo -u $USER_NAME $PREFIX/bin/pikiosk-update.sh"
   if [[ -x "$PREFIX/venv/bin/pikioskd" ]]; then
     if "$PREFIX/venv/bin/pikioskd" --check-config /etc/pi-kiosk/config.yaml; then

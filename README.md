@@ -86,7 +86,8 @@ On Linux, `make lint test` does the same checks. CI fails if `pikiosk/web/static
 
 ## Troubleshooting
 
-- `journalctl --user -u pikioskd -f` and `journalctl --user -u pikiosk-mpv -f`.
+- `sudo -u kiosk /opt/pi-kiosk/bin/pikiosk-diag` prints the commit, versions, unit states, mpv environment, audio sinks, both log tails, and the yt-dlp format list for `ytdlp.test_id` in one go. Paste that when asking for help.
+- `journalctl --user -u pikioskd -f` and `journalctl --user -u pikiosk-mpv -f`. The same output is also in `~kiosk/.cache/pi-kiosk/pikioskd.log` (rotating) and `~kiosk/.cache/pi-kiosk/mpv.log`, which is what the admin Status page tails.
 - HA shows the device unavailable: the broker host in the admin Connection page, Mosquitto credentials, and that the Pi can open port 1883.
 - Video fails immediately: `sudo -u kiosk /opt/pi-kiosk/bin/update-ytdlp.sh`. A cookies file can be set in `ytdlp.cookies_file` if YouTube asks for a sign-in.
 - The panel stays on the desktop: labwc `~kiosk/.config/labwc/autostart` should start `pikiosk-session.target` and should not start the panel or file manager.

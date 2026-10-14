@@ -1,0 +1,99 @@
+#!/bin/sh
+# One command whose output answers "why does the kiosk not play?".
+# Run as the service user:  sudo -u video-kiosk /opt/pi-kiosk/bin/pikiosk-diag
+set -u
+ROOT=${PIKIOSK_ROOT:-/opt/pi-kiosk}
+CONFIG=${PIKIOSK_CONFIG:-/etc/pi-kiosk/config.yaml}
+uid=$(id -u)
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$uid}
+
+section() {
+  printf '\n=== %s ===\n' "$1"
+}
+
+section "checkout"
+echo "user: $(id -un) ($uid)  host: $(hostname)  $(date -Is)"
+git -C "$ROOT" log -1 --format='commit %h %s (%ci)' 2>/dev/null || echo "no git checkout at $ROOT"
+echo "model: $(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo unknown)"
+. /etc/os-release 2>/dev/null && echo "os: ${PRETTY_NAME:-unknown}"
+
+section "versions"
+"$ROOT/venv/bin/python" -c 'import pikiosk; print("pikiosk", pikiosk.__version__)' 2>/dev/null || echo "pikiosk: venv missing"
+echo "yt-dlp $("$ROOT/venv/bin/yt-dlp" --version 2>/dev/null || echo missing)"
+mpv --version 2>/dev/null | head -1 || echo "mpv missing"
+echo "deno $(deno --version 2>/dev/null | head -1 || echo missing)"
+for c in chromium chromium-browser; do
+  if command -v "$c" >/dev/null 2>&1; then "$c" --version 2>/dev/null; break; fi
+done
+
+section "units"
+systemctl --user --no-pager --plain list-units 'pikiosk*' 2>&1 | sed '/^$/q'
+for unit in pikioskd pikiosk-mpv pikiosk-ui; do
+  printf '%s: %s\n' "$unit" "$(systemctl --user is-active "$unit.service" 2>&1)"
+done
+printf 'linger: %s\n' "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || echo unknown)"
+
+section "session environment"
+systemctl --user show-environment 2>/dev/null | grep -E '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR|XDG_SESSION_TYPE|DBUS_SESSION_BUS_ADDRESS)=' || echo "no user manager"
+mpv_pid=$(systemctl --user show pikiosk-mpv.service -p MainPID --value 2>/dev/null || echo 0)
+if [ -n "$mpv_pid" ] && [ "$mpv_pid" != "0" ] && [ -r "/proc/$mpv_pid/environ" ]; then
+  echo "mpv process $mpv_pid env:"
+  tr '\0' '\n' < "/proc/$mpv_pid/environ" | grep -E '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)=' | sed 's/^/  /'
+else
+  echo "mpv is not running"
+fi
+sock=$XDG_RUNTIME_DIR/pi-kiosk/mpv.sock
+if [ -S "$sock" ]; then echo "mpv socket: $sock (present)"; else echo "mpv socket: $sock (MISSING)"; fi
+
+section "audio"
+if command -v pactl >/dev/null 2>&1; then
+  echo "default sink: $(pactl get-default-sink 2>&1)"
+  pactl list short sinks 2>&1
+else
+  echo "pactl not installed"
+fi
+aplay -l 2>/dev/null | grep -E '^card' || echo "no ALSA playback cards"
+
+section "cache"
+for dir in "$HOME/.cache/pi-kiosk/videos" "$HOME/.cache/pi-kiosk/playback"; do
+  if [ -d "$dir" ]; then
+    printf '%s: %s, %s files\n' "$dir" "$(du -sh "$dir" 2>/dev/null | cut -f1)" "$(find "$dir" -type f | wc -l)"
+  else
+    echo "$dir: absent"
+  fi
+done
+df -h "$HOME" 2>/dev/null | tail -1
+
+section "health"
+for port in 8088 8090; do
+  printf 'http://127.0.0.1:%s/healthz -> %s\n' "$port" "$(curl -fsS -m 3 "http://127.0.0.1:$port/healthz" 2>&1 || echo unreachable)"
+done
+
+section "pikioskd log (last 60)"
+if journalctl --user -u pikioskd -n 60 --no-pager -o short-iso 2>/dev/null | grep -q .; then
+  journalctl --user -u pikioskd -n 60 --no-pager -o short-iso
+elif [ -f "$HOME/.cache/pi-kiosk/pikioskd.log" ]; then
+  tail -n 60 "$HOME/.cache/pi-kiosk/pikioskd.log"
+else
+  echo "no journal access and no $HOME/.cache/pi-kiosk/pikioskd.log yet"
+fi
+
+section "mpv log (last 60)"
+if [ -f "$HOME/.cache/pi-kiosk/mpv.log" ]; then
+  tail -n 60 "$HOME/.cache/pi-kiosk/mpv.log"
+else
+  journalctl --user -u pikiosk-mpv -n 60 --no-pager -o short-iso 2>/dev/null || echo "no mpv log"
+fi
+
+section "yt-dlp formats"
+test_id=$("$ROOT/venv/bin/python" - "$CONFIG" <<'PY' 2>/dev/null
+import sys
+from pikiosk.config import load_config
+print(load_config(sys.argv[1]).ytdlp.test_id)
+PY
+)
+test_id=${test_id:-XqZsoesa55w}
+echo "yt-dlp -F $test_id"
+timeout 90 "$ROOT/venv/bin/yt-dlp" -F --no-warnings "$test_id" 2>&1 | tail -n 25
+echo
+echo "done"

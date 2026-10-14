@@ -6,17 +6,20 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from aiohttp import web
 
+from pikiosk import __version__
 from pikiosk.cache.ytdlp import YtDlp, ytdlp_command, ytdlp_runtime_args
 from pikiosk.catalog import Catalog
 from pikiosk.clock import SystemClock
 from pikiosk.config import KioskConfig
 from pikiosk.config_store import ConfigStore
 from pikiosk.controller import Controller
+from pikiosk.diag import MPV_LOG, audio_sink, git_commit, tail
 from pikiosk.events import EventBus
-from pikiosk.logging_setup import setup_logging
+from pikiosk.logging_setup import DEFAULT_LOG_FILE, setup_logging
 from pikiosk.mqtt.aio import AioTransport
 from pikiosk.mqtt.bridge import MqttBridge
 from pikiosk.mqtt.memory import MemoryTransport
@@ -105,6 +108,20 @@ class App:
         self.notifier = Notifier()
         self._runners: list[web.AppRunner] = []
         self._ytdlp_version = ""
+        self.commit = git_commit()
+
+    def status_info(self) -> dict[str, Any]:
+        """Facts for the admin Status page that live outside KioskState."""
+        telemetry = self.bridge.telemetry
+        return {
+            "version": __version__,
+            "commit": self.commit,
+            "audio_sink": telemetry.get("audio_sink"),
+            "cache_used_gb": telemetry.get("cache_used_gb"),
+            "cache_items": telemetry.get("cache_items"),
+            "ytdlp_version": self._ytdlp_version,
+            "mpv_log": self.controller.mpv_log_tail() or tail(MPV_LOG, 10),
+        }
 
     async def _restart(self) -> None:
         log.info("restart requested")
@@ -136,7 +153,8 @@ class App:
         self._stop.set()
 
     async def run(self) -> None:
-        setup_logging(self.config.logging)
+        setup_logging(self.config.logging, default_file=None if self.simulate else DEFAULT_LOG_FILE)
+        log.info("pikioskd starting version=%s commit=%s", __version__, self.commit or "unknown")
         self.ready.set()
         self.notifier.ready()
         if isinstance(self.player, MpvPlayer):
@@ -178,12 +196,15 @@ class App:
             except Exception:
                 log.warning("yt-dlp version failed", exc_info=True)
         used_gb, items = await asyncio.to_thread(cache_usage, self.config.offline.directory)
+        sink = None if self.simulate else await asyncio.to_thread(audio_sink)
         payload = await asyncio.to_thread(
             collect,
             mqtt_host=self.config.mqtt.host,
             ytdlp_version=self._ytdlp_version,
             cache_used_gb=used_gb,
             cache_items=items,
+            commit=self.commit,
+            audio_sink=sink,
         )
         self.bridge.telemetry = payload
         try:
@@ -198,7 +219,12 @@ class App:
         await web.TCPSite(runner, self.config.ui.bind, self.config.ui.port).start()
         self._runners.append(runner)
         if self.config.admin.enabled and self.config_store is not None:
-            admin = create_admin_app(self.config_store, self.controller, on_saved=self.reload_saved)
+            admin = create_admin_app(
+                self.config_store,
+                self.controller,
+                on_saved=self.reload_saved,
+                info=self.status_info,
+            )
             admin_runner = web.AppRunner(admin)
             await admin_runner.setup()
             bind = "127.0.0.1" if self.simulate else self.config.admin.bind

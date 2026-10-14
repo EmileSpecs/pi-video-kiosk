@@ -78,6 +78,8 @@ def collect(
     cache_used_gb: float = 0,
     cache_items: int = 0,
     temp_path: Path | None = None,
+    commit: str = "",
+    audio_sink: str | None = None,
 ) -> dict[str, Any]:
     boot, uptime = read_boot()
     return {
@@ -87,6 +89,8 @@ def collect(
         "ip": local_ip(mqtt_host),
         "hostname": socket.gethostname(),
         "version": __version__,
+        "commit": commit,
+        "audio_sink": audio_sink,
         "ytdlp_version": ytdlp_version,
         "mpv_version": mpv_version,
         "cache_used_gb": round(cache_used_gb, 2),

@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from urllib.parse import quote
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 from aiohttp import web
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import ValidationError
 
+from pikiosk import __version__
 from pikiosk.catalog import Catalog
 from pikiosk.config import CatalogConfig, ConfigError, KioskConfig
 from pikiosk.config_store import ConfigStore
 from pikiosk.controller import Controller
+from pikiosk.diag import git_commit
 from pikiosk.web.auth import COOKIE, new_session, sign, unsign
 
 log = logging.getLogger("pikiosk.admin")
@@ -40,6 +42,7 @@ def create_admin_app(
     controller: Controller,
     *,
     on_saved: Callable[[], Awaitable[None]] | None = None,
+    info: Callable[[], dict[str, Any]] | None = None,
 ) -> web.Application:
     env = Environment(
         loader=FileSystemLoader(TEMPLATES),
@@ -50,6 +53,7 @@ def create_admin_app(
     app["controller"] = controller
     app["env"] = env
     app["on_saved"] = on_saved
+    app["info"] = info or (lambda: {"version": __version__, "commit": git_commit()})
     app["failures"] = {}
     app.router.add_get("/login", login_page)
     app.router.add_post("/login", login_post)
@@ -189,8 +193,8 @@ async def logout(request: web.Request) -> web.Response:
 async def status_page(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
-    controller: Controller = request.app["controller"]
-    return _render(request, "status.html", session, version=controller.config.device.name)
+    info: dict[str, Any] = request.app["info"]()
+    return _render(request, "status.html", session, info=info)
 
 
 def _connection_form(data: Any, config: KioskConfig) -> dict[str, Any]:
