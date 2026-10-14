@@ -183,6 +183,8 @@ class MqttBridge:
         self._last_comparable = comparable
         self._last_position_at = self.clock.monotonic()
         await self._retain(self.topics.state(), payload)
+        thumb = payload.get("thumbnail")
+        await self._retain(self.topics.thumbnail(), thumb if isinstance(thumb, str) else "")
 
     async def publish_player_status(self) -> None:
         player = "online" if self.controller.state.mpv_connected else "offline"

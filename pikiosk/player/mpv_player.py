@@ -11,6 +11,13 @@ from pikiosk.player.mpv_ipc import MpvClient, MpvError
 
 log = logging.getLogger("pikiosk.player")
 
+# Separate video+audio streams come back with no playable data. Ask for one
+# MP4 that already contains both.
+MUXED_YTDL_FORMAT = (
+    "best[height<=?720][vcodec^=avc1][acodec^=mp4a]/"
+    "best[height<=?720][ext=mp4]/18/best[ext=mp4]"
+)
+
 
 class MpvPlayer:
     def __init__(
@@ -160,6 +167,8 @@ class MpvPlayer:
         # YouTube needs a JS runtime and the EJS solver. Setting this property
         # replaces the whole list from mpv.conf, so keep the solver options here.
         raw += ",js-runtimes=deno:/usr/local/bin/deno,remote-components=ejs:github"
+        raw += ",extractor-args=youtube:player_client=web_embedded\\,android"
+        await self.set_property("ytdl-format", MUXED_YTDL_FORMAT)
         await self.set_property("ytdl-raw-options", raw)
         if options:
             await self._cmd("loadfile", target, mode, -1, options)

@@ -21,6 +21,9 @@ class Topics:
     def state(self) -> str:
         return f"{self.base}/state"
 
+    def thumbnail(self) -> str:
+        return f"{self.base}/thumbnail_url"
+
     def screen(self) -> str:
         return f"{self.base}/screen/state"
 

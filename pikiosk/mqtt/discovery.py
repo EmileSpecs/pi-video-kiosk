@@ -304,8 +304,7 @@ def build_component_payloads(
         "thumbnail",
         {
             **_identity(config, "sensor", "thumbnail", "Thumbnail URL"),
-            "state_topic": state,
-            "value_template": "{{ value_json.thumbnail or '' }}",
+            "state_topic": topics.thumbnail(),
             "icon": "mdi:image",
         },
         player=True,

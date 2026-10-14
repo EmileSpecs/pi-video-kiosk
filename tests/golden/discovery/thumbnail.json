@@ -30,7 +30,6 @@
   "name": "Thumbnail URL",
   "unique_id": "pikiosk_kids_kiosk_thumbnail",
   "default_entity_id": "sensor.kids_kiosk_thumbnail",
-  "state_topic": "pikiosk/kids_kiosk/state",
-  "value_template": "{{ value_json.thumbnail or '' }}",
+  "state_topic": "pikiosk/kids_kiosk/thumbnail_url",
   "icon": "mdi:image"
 }
