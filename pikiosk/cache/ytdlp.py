@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("pikiosk.ytdlp")
@@ -149,6 +150,92 @@ class YtDlp:
         if not streams:
             return [], (err or "yt-dlp returned no playable URL").strip()
         return streams, ""
+
+    async def download_media(
+        self,
+        url: str,
+        fmt: str,
+        directory: str,
+        *,
+        playlist: bool,
+        limit: int | None,
+    ) -> tuple[list[str], str]:
+        """Save a real media file and return its path.
+
+        mpv cannot play the separate streams YouTube returns. yt-dlp downloads
+        them, merges picture and sound, and mpv then opens that file.
+        """
+        folder = Path(directory)
+        folder.mkdir(parents=True, exist_ok=True)
+        paths, err = await self._download_once(url, fmt, folder, playlist=playlist, limit=limit)
+        if paths:
+            return paths, ""
+        if _download_should_retry(err):
+            paths, retry_err = await self._download_once(
+                url,
+                "18/b",
+                folder,
+                playlist=playlist,
+                limit=limit,
+                extractor_args="youtube:player_client=web_embedded",
+            )
+            if paths:
+                return paths, ""
+            return [], (retry_err or err).strip()
+        return [], err.strip()
+
+    async def _download_once(
+        self,
+        url: str,
+        fmt: str,
+        folder: Path,
+        *,
+        playlist: bool,
+        limit: int | None,
+        extractor_args: str | None = None,
+    ) -> tuple[list[str], str]:
+        args = [
+            "-f",
+            fmt,
+            "--merge-output-format",
+            "mkv",
+            "--force-overwrites",
+            "--no-warnings",
+            "--no-progress",
+            "-o",
+            str(folder / "%(id)s.%(ext)s"),
+            "--print",
+            "after_move:filepath",
+        ]
+        if extractor_args:
+            args.extend(["--extractor-args", extractor_args])
+        if playlist:
+            args.append("--yes-playlist")
+            if limit:
+                args.extend(["--playlist-end", str(limit)])
+        else:
+            args.append("--no-playlist")
+        args.append(url)
+        code, out, err = await self.run(args)
+        paths = [line.strip() for line in out.splitlines() if line.strip() and Path(line.strip()).is_file()]
+        if code != 0 or not paths:
+            return [], (err or out or "yt-dlp did not write a file").strip()
+        keep = set(paths)
+        for old in folder.iterdir():
+            if old.is_file() and str(old) not in keep:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        return paths, ""
+
+
+def _download_should_retry(err: str) -> bool:
+    lowered = err.lower()
+    return any(
+        token in lowered
+        for token in ("403", "forbidden", "format", "sabr", "nsig", "signature", "only images")
+    )
 
 
 def stream_pair(item: dict[str, Any]) -> ResolvedStream | None:

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from pikiosk.cache.ytdlp import YtDlp, classify_error
@@ -445,17 +446,42 @@ class Controller:
             )
         )
         target_is_playlist = bool(playable.playlist_id) and not playable.path
+        extra_paths: list[str] = []
+        download = getattr(self.ytdlp, "download_media", None)
+        if download is not None and playable.url and not playable.path:
+            folder = Path(self.config.offline.directory).expanduser().parent / "playback"
+            paths, err = await download(
+                playable.url,
+                self.config.playback.ytdl_format,
+                str(folder),
+                playlist=target_is_playlist,
+                limit=playable.max_items,
+            )
+            if not paths:
+                await self._on_error(err or "yt-dlp failed")
+                return
+            playable = replace(playable, path=paths[0])
+            extra_paths = paths[1:]
+            target_is_playlist = False
         await self.player.load(
             None if playable.path else playable.url,
             playable.path,
             start=playable.start,
             playlist=target_is_playlist,
             max_items=playable.max_items,
-            shuffle=playable.shuffle,
+            shuffle=playable.shuffle and not extra_paths,
         )
+        for index, path in enumerate(extra_paths):
+            await self.player.load(
+                None,
+                path,
+                append=True,
+                shuffle=playable.shuffle and index == len(extra_paths) - 1,
+            )
         if self.state.after_video == AfterVideo.LOOP:
-            await self.player.set_loop_file(not target_is_playlist)
-            await self.player.set_loop_playlist(target_is_playlist)
+            playing_playlist = target_is_playlist or bool(extra_paths)
+            await self.player.set_loop_file(not playing_playlist)
+            await self.player.set_loop_playlist(playing_playlist)
         await self.drain()
         if self.state.player == PlayerState.LOADING:
             self.clock.call_later(60, lambda: self._load_timed_out(generation))

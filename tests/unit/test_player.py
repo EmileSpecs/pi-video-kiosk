@@ -177,3 +177,33 @@ async def test_brightness_slider_sets_percent(tmp_path, example_config, clock) -
     await controller.dispatch("set_brightness", {"percent": 40})
     assert controller.state.brightness == 102
     assert screen.brightness == 102
+
+
+class _Files:
+    def __init__(self, paths: list[str], err: str = "") -> None:
+        self.paths = paths
+        self.err = err
+
+    async def download_media(self, url: str, fmt: str, directory: str, *, playlist: bool, limit: int | None):
+        del url, fmt, directory, playlist, limit
+        return self.paths, self.err
+
+
+async def test_play_uses_downloaded_file(tmp_path, example_config, clock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    media = tmp_path / "baby.mkv"
+    media.write_bytes(b"media")
+    controller.ytdlp = _Files([str(media)])
+    await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
+    assert player.loads[0]["target"] == str(media)
+    assert controller.state.player == PlayerState.PLAYING
+
+
+async def test_download_failure_is_shown(tmp_path, example_config, clock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    controller.ytdlp = _Files([], "ERROR: HTTP Error 403: Forbidden")
+    await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
+    assert player.loads == []
+    assert controller.state.last_error == "extractor"
+    assert controller.state.error_detail
+    assert "403" in controller.state.error_detail
