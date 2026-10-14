@@ -122,11 +122,28 @@ place_tree() {
   fi
   if [[ -n "$REPO" && ! -d "$PREFIX/.git" ]]; then
     git clone --branch "$REF" "$REPO" "$PREFIX"
+  elif [[ -d "$PREFIX/.git" && -n "$REPO" ]]; then
+    git -C "$PREFIX" -c safe.directory="$PREFIX" fetch origin "$REF" || warn "could not fetch $REF"
+    git -C "$PREFIX" -c safe.directory="$PREFIX" pull --ff-only origin "$REF" || warn "could not fast-forward $REF"
   elif [[ ! -f "$PREFIX/pyproject.toml" ]]; then
     echo "no checkout at $PREFIX; pass --repo URL or --dev" >&2
     exit 1
   fi
   chown -R "$USER_NAME:$USER_NAME" "$PREFIX"
+}
+
+fix_perms() {
+  install -d -o root -g "$USER_NAME" -m 2770 /etc/pi-kiosk
+  chown root:"$USER_NAME" /etc/pi-kiosk
+  chmod 2770 /etc/pi-kiosk
+  local path
+  shopt -s nullglob
+  for path in /etc/pi-kiosk/*; do
+    if [[ -f "$path" ]]; then
+      chown root:"$USER_NAME" "$path"
+      chmod 0660 "$path"
+    fi
+  done
 }
 
 install_venv() {
@@ -195,9 +212,7 @@ PY
   if [[ ! -f /etc/pi-kiosk/secrets.yaml ]]; then
     cp "$PREFIX/config/secrets.example.yaml" /etc/pi-kiosk/secrets.yaml
   fi
-  chown root:"$USER_NAME" /etc/pi-kiosk/config.yaml /etc/pi-kiosk/secrets.yaml
-  chmod 0770 /etc/pi-kiosk
-  chmod 0660 /etc/pi-kiosk/config.yaml /etc/pi-kiosk/secrets.yaml
+  fix_perms
   password=$("$PREFIX/venv/bin/python" - <<'PY'
 from pathlib import Path
 import secrets
@@ -223,6 +238,11 @@ PY
     echo "Admin password (shown once): $password"
     echo "Open http://<this-pi>:8090 after the service starts."
   fi
+  fix_perms
+  cat > /etc/sudoers.d/pikiosk << EOF
+$USER_NAME ALL=(root) NOPASSWD: $PREFIX/bin/pikiosk-fix-perms
+EOF
+  chmod 0440 /etc/sudoers.d/pikiosk
   install -d -o "$USER_NAME" -g "$USER_NAME" -m 0700 "/home/$USER_NAME/.local/state/pi-kiosk"
   install -d -o "$USER_NAME" -g "$USER_NAME" -m 0700 "/home/$USER_NAME/.cache/pi-kiosk/videos"
 }

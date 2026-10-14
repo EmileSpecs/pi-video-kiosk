@@ -124,9 +124,16 @@ async def _save(request: web.Request, config: KioskConfig, secrets: dict[str, An
         return f"Could not write the config files: {exc}"
     except ConfigError as exc:
         return str(exc)
+    except Exception as exc:
+        log.exception("config save failed")
+        return f"Could not save config: {exc}"
     callback = request.app["on_saved"]
     if callback:
-        await callback()
+        try:
+            await callback()
+        except Exception as exc:
+            log.exception("config reload failed")
+            return f"Saved, but reload failed: {exc}"
     return None
 
 

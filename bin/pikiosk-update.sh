@@ -10,6 +10,9 @@ if [ "${1:-}" = "--from-timer" ]; then
 fi
 
 cd "$ROOT"
+if [ -x "$ROOT/bin/pikiosk-fix-perms" ]; then
+  sudo -n "$ROOT/bin/pikiosk-fix-perms" "$(id -un)" || echo "could not repair /etc/pi-kiosk permissions" >&2
+fi
 PY=$ROOT/venv/bin/python
 fields=$("$PY" - "$CONFIG" "$STATE" "$FROM_TIMER" <<'PY'
 import json
