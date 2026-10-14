@@ -310,10 +310,14 @@ install_mpv_and_labwc() {
   } > "$rc"
   chown "$USER_NAME:$USER_NAME" "$rc"
   install -d -o "$USER_NAME" -g "$USER_NAME" "$home/.config/yt-dlp"
-  cat > "$home/.config/yt-dlp/config" << 'EOF'
---js-runtimes deno:/usr/local/bin/deno
---remote-components ejs:github
-EOF
+  {
+    printf '%s\n' '--remote-components ejs:github'
+    if [[ -x /usr/local/bin/deno ]]; then
+      printf '%s\n' '--js-runtimes deno:/usr/local/bin/deno'
+    elif command -v deno >/dev/null 2>&1; then
+      printf '%s\n' "--js-runtimes deno:$(command -v deno)"
+    fi
+  } > "$home/.config/yt-dlp/config"
   chown "$USER_NAME:$USER_NAME" "$home/.config/yt-dlp/config"
   systemctl disable --now squeekboard.service >/dev/null 2>&1 || true
 }
@@ -353,8 +357,8 @@ install_units() {
     sudo -u "$USER_NAME" XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user "$@" || true
   }
   run_user daemon-reload
-  run_user enable --now pikioskd.service
-  run_user enable pikiosk-ytdlp-update.timer pikiosk-update.timer
+  run_user enable pikioskd.service pikiosk-ytdlp-update.timer pikiosk-update.timer
+  run_user restart pikioskd.service
   if [[ "$NO_UI" -eq 0 ]]; then
     run_user enable --now pikiosk-mpv.service
     run_user enable pikiosk-ui.service

@@ -43,7 +43,10 @@ class MemoryPlayer:
         playlist: bool = False,
         max_items: int | None = None,
         shuffle: bool = False,
+        audio_url: str | None = None,
+        append: bool = False,
     ) -> None:
+        del audio_url, append
         target = path or url or ""
         self.loads.append(
             {

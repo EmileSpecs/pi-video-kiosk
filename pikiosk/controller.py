@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
-from pikiosk.cache.ytdlp import classify_error
+from pikiosk.cache.ytdlp import YtDlp, classify_error
 from pikiosk.catalog import Catalog, CatalogError, Playable, thumbnail_url
 from pikiosk.clock import Clock
 from pikiosk.config import KioskConfig
@@ -38,6 +38,7 @@ class Controller:
         cache_lookup: Callable[[str], str | None] | None = None,
         on_restart: Hook | None = None,
         on_update_ytdlp: Hook | None = None,
+        ytdlp: YtDlp | None = None,
         on_update_app: Hook | None = None,
         on_sync: Hook | None = None,
         on_reload: Callable[[KioskConfig], Awaitable[None]] | None = None,
@@ -52,6 +53,7 @@ class Controller:
         self.cache_lookup = cache_lookup
         self.on_restart = on_restart
         self.on_update_ytdlp = on_update_ytdlp
+        self.ytdlp = ytdlp
         self.on_update_app = on_update_app
         self.on_sync = on_sync
         self.on_reload = on_reload
@@ -426,17 +428,36 @@ class Controller:
                 now=now,
                 selected=selected,
                 last_error=None,
+                error_detail=None,
             )
         )
         target_is_playlist = bool(playable.playlist_id) and not playable.path
+        video_url = None if playable.path else playable.url
+        audio_url = None
+        extra: list[tuple[str, str | None]] = []
+        if self.ytdlp and playable.url and not playable.path:
+            streams, err = await self.ytdlp.resolve_streams(
+                playable.url,
+                self.config.playback.ytdl_format,
+                playlist=target_is_playlist,
+                limit=playable.max_items,
+            )
+            if not streams:
+                await self._on_error(err or "yt-dlp failed")
+                return
+            video_url, audio_url = streams[0]
+            extra = streams[1:]
         await self.player.load(
-            None if playable.path else playable.url,
+            video_url,
             playable.path,
             start=playable.start,
-            playlist=target_is_playlist,
+            playlist=target_is_playlist and not extra,
             max_items=playable.max_items,
             shuffle=playable.shuffle,
+            audio_url=audio_url,
         )
+        for extra_video, extra_audio in extra:
+            await self.player.load(extra_video, None, audio_url=extra_audio, append=True)
         if self.state.after_video == AfterVideo.LOOP:
             await self.player.set_loop_file(not target_is_playlist)
             await self.player.set_loop_playlist(target_is_playlist)
@@ -558,7 +579,15 @@ class Controller:
 
     async def _on_error(self, detail: str) -> None:
         kind = classify_error(detail)
-        self._set(replace(self.state, player=PlayerState.ERROR, last_error=kind))
+        text = " ".join(detail.split())
+        self._set(
+            replace(
+                self.state,
+                player=PlayerState.ERROR,
+                last_error=kind,
+                error_detail=text[:400] or None,
+            )
+        )
         self.bus.publish(Event("error", {"error": kind, "detail": detail}))
         current = self.state.now
         cached = self._cached(current.video_id if current else None)
@@ -572,7 +601,7 @@ class Controller:
                 self._extractor_failures = 0
                 self._last_heal = self.clock.monotonic()
                 await self.cmd_update_ytdlp()
-        if self._retries < 1:
+        if self._retries < 1 and self.ytdlp is None:
             self._retries += 1
             self.clock.call_later(3, self._retry)
         self.clock.call_later(10, self._clear_error)

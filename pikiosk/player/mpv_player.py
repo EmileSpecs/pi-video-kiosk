@@ -138,8 +138,11 @@ class MpvPlayer:
         playlist: bool = False,
         max_items: int | None = None,
         shuffle: bool = False,
+        audio_url: str | None = None,
+        append: bool = False,
     ) -> None:
         target = path or url or ""
+        mode = "append" if append else "replace"
         options = f"start={start}" if start else ""
         if playlist:
             items = f"1-{max_items}" if max_items else "1-50"
@@ -151,9 +154,14 @@ class MpvPlayer:
         raw += ",js-runtimes=deno:/usr/local/bin/deno,remote-components=ejs:github"
         await self.set_property("ytdl-raw-options", raw)
         if options:
-            await self._cmd("loadfile", target, "replace", -1, options)
+            await self._cmd("loadfile", target, mode, -1, options)
         else:
-            await self._cmd("loadfile", target, "replace")
+            await self._cmd("loadfile", target, mode)
+        if audio_url:
+            try:
+                await self._cmd("audio-add", audio_url, "select")
+            except MpvError as exc:
+                log.warning("audio-add failed error=%s", exc)
         if shuffle:
             await self._cmd("playlist-shuffle")
 

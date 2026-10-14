@@ -9,6 +9,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from pikiosk.cache.ytdlp import YtDlp, ytdlp_command, ytdlp_runtime_args
 from pikiosk.catalog import Catalog
 from pikiosk.clock import SystemClock
 from pikiosk.config import KioskConfig
@@ -94,6 +95,7 @@ class App:
             catalog=self.catalog,
             on_restart=self._restart,
             on_reload=self._reload_hook,
+            ytdlp=None if simulate else YtDlp(ytdlp_command(), extra_args=ytdlp_runtime_args()),
         )
         self.bridge = MqttBridge(config, self.controller, self.transport, self.clock, self.store)
         self.config_store = None

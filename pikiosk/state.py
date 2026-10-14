@@ -52,6 +52,7 @@ class KioskState:
     ui_locked: bool = False
     selected: str | None = None
     last_error: str | None = None
+    error_detail: str | None = None
     mpv_connected: bool = False
     mpv_error: str | None = None
     mqtt_connected: bool = False

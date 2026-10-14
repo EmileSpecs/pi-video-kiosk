@@ -115,3 +115,31 @@ async def test_unknown_select(tmp_path, example_config, clock) -> None:
     await controller.dispatch("select", {"name": "nope"})
     assert player.loads == []
     assert controller.bus.history[-1].type == "error"
+
+
+class _Streams:
+    def __init__(self, streams: list[tuple[str, str | None]], err: str = "") -> None:
+        self.streams = streams
+        self.err = err
+
+    async def resolve_streams(self, url: str, fmt: str, *, playlist: bool, limit: int | None):
+        del url, fmt, playlist, limit
+        return self.streams, self.err
+
+
+async def test_play_uses_resolved_stream(tmp_path, example_config, clock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    controller.ytdlp = _Streams([("https://cdn.example/video", "https://cdn.example/audio")])
+    await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
+    assert player.loads[0]["target"] == "https://cdn.example/video"
+    assert controller.state.player == PlayerState.PLAYING
+
+
+async def test_play_shows_ytdlp_detail(tmp_path, example_config, clock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    controller.ytdlp = _Streams([], "ERROR: [youtube] n challenge solving failed")
+    await controller.dispatch("play_media", {"ref": "https://youtu.be/XqZsoesa55w"})
+    assert player.loads == []
+    assert controller.state.last_error == "extractor"
+    assert controller.state.error_detail
+    assert "n challenge" in controller.state.error_detail

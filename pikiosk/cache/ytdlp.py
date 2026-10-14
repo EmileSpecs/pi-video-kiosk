@@ -5,9 +5,28 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import shutil
 from typing import Any
 
 log = logging.getLogger("pikiosk.ytdlp")
+
+
+def ytdlp_command() -> list[str]:
+    override = os.environ.get("PIKIOSK_YTDLP")
+    for candidate in (override, "/opt/pi-kiosk/venv/bin/yt-dlp", shutil.which("yt-dlp")):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return [candidate]
+    return ["yt-dlp"]
+
+
+def ytdlp_runtime_args() -> list[str]:
+    args = ["--remote-components", "ejs:github"]
+    for candidate in ("/usr/local/bin/deno", "/usr/bin/deno", shutil.which("deno")):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            args.extend(["--js-runtimes", f"deno:{candidate}"])
+            break
+    return args
 
 
 def classify_error(text: str) -> str:
@@ -74,3 +93,65 @@ class YtDlp:
         except json.JSONDecodeError:
             return None
         return payload if isinstance(payload, dict) else None
+
+    async def resolve_streams(
+        self,
+        url: str,
+        fmt: str,
+        *,
+        playlist: bool,
+        limit: int | None,
+    ) -> tuple[list[tuple[str, str | None]], str]:
+        args = ["-J", "--no-warnings", "-f", fmt]
+        if playlist:
+            args.append("--yes-playlist")
+            if limit:
+                args.extend(["--playlist-end", str(limit)])
+        else:
+            args.append("--no-playlist")
+        args.append(url)
+        code, out, err = await self.run(args)
+        if code != 0 and fmt != "bv*+ba/b" and "format" in (err or out).lower():
+            retried: list[str] = []
+            replace_next = False
+            for arg in args:
+                if replace_next:
+                    retried.append("bv*+ba/b")
+                    replace_next = False
+                    continue
+                retried.append(arg)
+                if arg == "-f":
+                    replace_next = True
+            code, out, err = await self.run(retried)
+        if code != 0:
+            return [], (err or out).strip()
+        try:
+            payload = json.loads(out or "{}")
+        except json.JSONDecodeError:
+            return [], (err or "yt-dlp did not return JSON").strip()
+        if not isinstance(payload, dict):
+            return [], (err or "yt-dlp did not return JSON").strip()
+        entries = payload.get("entries")
+        items = entries if isinstance(entries, list) else [payload]
+        streams: list[tuple[str, str | None]] = []
+        for item in items:
+            if isinstance(item, dict):
+                pair = stream_pair(item)
+                if pair:
+                    streams.append(pair)
+        if not streams:
+            return [], (err or "yt-dlp returned no playable URL").strip()
+        return streams, ""
+
+
+def stream_pair(item: dict[str, Any]) -> tuple[str, str | None] | None:
+    requested = item.get("requested_formats")
+    if isinstance(requested, list) and requested and isinstance(requested[0], dict):
+        video = requested[0].get("url")
+        audio = requested[1].get("url") if len(requested) > 1 and isinstance(requested[1], dict) else None
+        if isinstance(video, str) and video.startswith("http"):
+            return video, audio if isinstance(audio, str) and audio.startswith("http") else None
+    direct = item.get("url")
+    if isinstance(direct, str) and direct.startswith("http"):
+        return direct, None
+    return None

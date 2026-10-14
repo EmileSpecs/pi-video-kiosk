@@ -15,6 +15,9 @@
     {% endif %}
     <div class="col-span-2"><dt class="text-slate-500">Now</dt><dd class="font-medium">{{ state.now.title if state.now else "Idle" }}</dd></div>
     <div class="col-span-2"><dt class="text-slate-500">Last error</dt><dd>{{ state.last_error or "—" }}</dd></div>
+    {% if state.error_detail %}
+    <div class="col-span-2"><dt class="text-slate-500">Detail</dt><dd>{{ state.error_detail }}</dd></div>
+    {% endif %}
   </dl>
 </section>
 {% endblock %}
