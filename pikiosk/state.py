@@ -55,6 +55,7 @@ class KioskState:
     mpv_connected: bool = False
     mqtt_connected: bool = False
     mqtt_ever_connected: bool = False
+    mqtt_error: str | None = None
 
 
 def percent_to_ha(percent: int) -> int:

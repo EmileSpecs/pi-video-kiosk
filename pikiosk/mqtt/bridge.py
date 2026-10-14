@@ -45,12 +45,16 @@ class MqttBridge:
         self._last_position_at = -1e9
         self._task: asyncio.Task[None] | None = None
         self._pending_out: dict[str, tuple[str, bool, int]] = {}
+        self._reconnect = asyncio.Event()
         controller.subscribe(self._on_state)
         controller.bus.subscribe(self._on_event)
 
     def update_config(self, config: KioskConfig) -> None:
         self.config = config
         self.topics = Topics(config)
+        if getattr(self.transport, "config", None) is not None:
+            self.transport.config = config  # type: ignore[attr-defined]
+        self._reconnect.set()
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self.run())
@@ -70,20 +74,62 @@ class MqttBridge:
     async def run(self) -> None:
         delay = self.config.mqtt.reconnect.min_delay_s
         while not self._stop.is_set():
+            error: str | None = None
             try:
                 await self._on_connect()
                 delay = self.config.mqtt.reconnect.min_delay_s
-                async for message in self.transport.messages():
-                    await self._on_message(message)
+                if self._reconnect.is_set():
+                    await self.transport.disconnect()
+                else:
+                    await self._pump()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.info("mqtt disconnected error=%s", exc)
-            await self.controller.set_mqtt_connected(False)
+                log.warning("mqtt disconnected error=%s", exc)
+                error = str(exc)
+            await self.controller.set_mqtt_connected(False, error=error)
             if self._stop.is_set():
                 break
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, self.config.mqtt.reconnect.max_delay_s)
+            if self._reconnect.is_set():
+                self._reconnect.clear()
+                delay = self.config.mqtt.reconnect.min_delay_s
+                continue
+            try:
+                await asyncio.wait_for(self._reconnect.wait(), timeout=delay)
+            except (asyncio.TimeoutError, TimeoutError):
+                delay = min(delay * 2, self.config.mqtt.reconnect.max_delay_s)
+            self._reconnect.clear()
+
+    async def _pump(self) -> None:
+        incoming = self.transport.messages()
+        message_task = asyncio.create_task(self._next_message(incoming))
+        wake_task = asyncio.create_task(self._reconnect.wait())
+        try:
+            while not self._stop.is_set():
+                done, _pending = await asyncio.wait(
+                    {message_task, wake_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if wake_task in done or self._stop.is_set():
+                    return
+                message = message_task.result()
+                if message is None:
+                    return
+                await self._on_message(message)
+                message_task = asyncio.create_task(self._next_message(incoming))
+        finally:
+            for task in (message_task, wake_task):
+                if not task.done():
+                    task.cancel()
+            if self.transport.connected:
+                await self.transport.disconnect()
+
+    async def _next_message(self, incoming: Any) -> Incoming | None:
+        try:
+            message = await incoming.__anext__()
+        except StopAsyncIteration:
+            return None
+        return message if isinstance(message, Incoming) else None
 
     async def _on_connect(self) -> None:
         if not self.transport.connected:

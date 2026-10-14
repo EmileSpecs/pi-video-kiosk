@@ -313,9 +313,16 @@ class Controller:
             await self.player.set_mute(self.state.muted)
             await self._flush_pending()
 
-    async def set_mqtt_connected(self, connected: bool) -> None:
+    async def set_mqtt_connected(self, connected: bool, error: str | None = None) -> None:
         ever = self.state.mqtt_ever_connected or connected
-        self._set(replace(self.state, mqtt_connected=connected, mqtt_ever_connected=ever))
+        self._set(
+            replace(
+                self.state,
+                mqtt_connected=connected,
+                mqtt_ever_connected=ever,
+                mqtt_error=None if connected else error if error is not None else self.state.mqtt_error,
+            )
+        )
 
     def touch(self, kind: str = "tap") -> None:
         self.screen.note_activity()
