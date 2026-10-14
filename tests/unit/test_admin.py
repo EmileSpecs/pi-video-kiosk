@@ -107,6 +107,27 @@ async def test_bad_form_keeps_files(tmp_path, clock) -> None:
         await client.close()
 
 
+async def test_connection_save_reports_permission_error(tmp_path, clock, monkeypatch) -> None:
+    client, store, _controller = await _admin(tmp_path, clock)
+
+    def denied(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", "/etc/pi-kiosk/config.yaml")
+
+    monkeypatch.setattr(store, "save", denied)
+    try:
+        csrf = await _login(client)
+        response = await client.post(
+            "/connection",
+            data={"csrf": csrf, "device_id": "kids_kiosk", "name": "Kids Kiosk", "host": "127.0.0.1", "port": "1883"},
+            allow_redirects=False,
+        )
+        text = await response.text()
+        assert response.status == 200
+        assert "Could not write the config files" in text
+    finally:
+        await client.close()
+
+
 async def test_secrets_not_in_html(tmp_path, clock) -> None:
     client, _store, _controller = await _admin(tmp_path, clock)
     try:

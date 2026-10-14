@@ -147,11 +147,11 @@ install_venv() {
 }
 
 write_config() {
-  install -d -o root -g "$USER_NAME" -m 0750 /etc/pi-kiosk
+  install -d -o root -g "$USER_NAME" -m 0770 /etc/pi-kiosk
   if [[ ! -f /etc/pi-kiosk/config.yaml ]]; then
     cp "$PREFIX/config/config.example.yaml" /etc/pi-kiosk/config.yaml
     chown root:"$USER_NAME" /etc/pi-kiosk/config.yaml
-    chmod 0644 /etc/pi-kiosk/config.yaml
+    chmod 0660 /etc/pi-kiosk/config.yaml
     if [[ -n "$REPO" ]]; then
       "$PREFIX/venv/bin/python" - "$REPO" <<'PY'
 import sys
@@ -195,8 +195,9 @@ PY
   if [[ ! -f /etc/pi-kiosk/secrets.yaml ]]; then
     cp "$PREFIX/config/secrets.example.yaml" /etc/pi-kiosk/secrets.yaml
   fi
-  chown root:"$USER_NAME" /etc/pi-kiosk/secrets.yaml
-  chmod 0640 /etc/pi-kiosk/secrets.yaml
+  chown root:"$USER_NAME" /etc/pi-kiosk/config.yaml /etc/pi-kiosk/secrets.yaml
+  chmod 0770 /etc/pi-kiosk
+  chmod 0660 /etc/pi-kiosk/config.yaml /etc/pi-kiosk/secrets.yaml
   password=$("$PREFIX/venv/bin/python" - <<'PY'
 from pathlib import Path
 import secrets

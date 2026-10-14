@@ -116,12 +116,18 @@ def _check_csrf(request: web.Request, data: Any, session: dict[str, Any]) -> Non
         raise web.HTTPForbidden(text="bad csrf")
 
 
-async def _save(request: web.Request, config: KioskConfig, secrets: dict[str, Any]) -> None:
+async def _save(request: web.Request, config: KioskConfig, secrets: dict[str, Any]) -> str | None:
     store: ConfigStore = request.app["store"]
-    store.save(config, secrets)
+    try:
+        store.save(config, secrets)
+    except OSError as exc:
+        return f"Could not write the config files: {exc}"
+    except ConfigError as exc:
+        return str(exc)
     callback = request.app["on_saved"]
     if callback:
         await callback()
+    return None
 
 
 def _catalog(config: KioskConfig) -> Catalog:
@@ -221,7 +227,9 @@ async def connection_post(request: web.Request) -> web.Response:
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ConfigError, ValueError) as exc:
         return _render(request, "connection.html", session, error=str(exc))
-    await _save(request, config, secrets)
+    error = await _save(request, config, secrets)
+    if error:
+        return _render(request, "connection.html", session, error=error)
     raise web.HTTPFound("/connection?notice=saved")
 
 
@@ -286,7 +294,9 @@ async def catalog_post(request: web.Request) -> web.Response:
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ValueError) as exc:
         return _render(request, "catalog.html", session, error=str(exc))
-    await _save(request, config, dict(store.secrets))
+    error = await _save(request, config, dict(store.secrets))
+    if error:
+        return _render(request, "catalog.html", session, error=error)
     raise web.HTTPFound("/catalog")
 
 
@@ -315,7 +325,9 @@ async def playback_post(request: web.Request) -> web.Response:
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ValueError) as exc:
         return _render(request, "playback.html", session, error=str(exc))
-    await _save(request, config, dict(store.secrets))
+    error = await _save(request, config, dict(store.secrets))
+    if error:
+        return _render(request, "playback.html", session, error=error)
     raise web.HTTPFound("/playback")
 
 
@@ -343,7 +355,9 @@ async def screen_post(request: web.Request) -> web.Response:
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ValueError) as exc:
         return _render(request, "screen.html", session, error=str(exc))
-    await _save(request, config, dict(store.secrets))
+    error = await _save(request, config, dict(store.secrets))
+    if error:
+        return _render(request, "screen.html", session, error=error)
     raise web.HTTPFound("/screen")
 
 
@@ -368,7 +382,9 @@ async def updates_post(request: web.Request) -> web.Response:
         }
     )
     config = store.config.model_copy(update={"update": update})
-    await _save(request, config, dict(store.secrets))
+    error = await _save(request, config, dict(store.secrets))
+    if error:
+        return _render(request, "updates.html", session, error=error)
     if data.get("action") == "now":
         await controller.cmd_update_app()
     raise web.HTTPFound("/updates")
@@ -396,7 +412,9 @@ async def offline_post(request: web.Request) -> web.Response:
         }
     )
     config = store.config.model_copy(update={"offline": offline})
-    await _save(request, config, dict(store.secrets))
+    error = await _save(request, config, dict(store.secrets))
+    if error:
+        return _render(request, "offline.html", session, error=error)
     if data.get("action") == "sync":
         await controller.cmd_sync_offline()
     raise web.HTTPFound("/offline")
@@ -422,7 +440,9 @@ async def touch_post(request: web.Request) -> web.Response:
         }
     )
     config = store.config.model_copy(update={"ui": ui})
-    await _save(request, config, dict(store.secrets))
+    error = await _save(request, config, dict(store.secrets))
+    if error:
+        return _render(request, "touch.html", session, error=error)
     raise web.HTTPFound("/touch")
 
 
