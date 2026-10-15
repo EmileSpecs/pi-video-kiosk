@@ -19,7 +19,8 @@ def map_brightness(ha_brightness: int, max_brightness: int, min_percent: int) ->
     """Map a Home Assistant 0–255 brightness onto the panel's sysfs range."""
     if ha_brightness <= 0 or max_brightness <= 0:
         return 0
-    floor = math.ceil(min_percent / 100 * max_brightness)
+    # "On" is never sysfs 0, which most panels treat as off.
+    floor = max(1, math.ceil(min_percent / 100 * max_brightness))
     mapped = round(ha_brightness / 255 * max_brightness)
     return max(mapped, floor)
 

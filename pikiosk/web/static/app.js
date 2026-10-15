@@ -10,6 +10,7 @@
   const locked = $("locked");
   const hotspot = $("hotspot");
   const pinpad = $("pinpad");
+  const dim = $("dim");
 
   const ui = {
     columns: 3,
@@ -247,6 +248,7 @@
       if (!first) loadCatalog();
     }
     setLocked(Boolean(next.ui_locked));
+    if (typeof next.dim === "number") dim.style.opacity = String(Math.max(0, Math.min(0.95, next.dim)));
 
     for (const [name, node] of cards) {
       const selected = next.selected === name;

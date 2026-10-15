@@ -73,6 +73,7 @@ def screen_payload(state: KioskState) -> dict[str, Any]:
         "state": "ON" if state.screen_on else "OFF",
         "brightness": state.brightness,
         "color_mode": "brightness",
+        "extra_dim": state.extra_dim,
     }
 
 

@@ -1,0 +1,39 @@
+{
+  "availability": [
+    {
+      "topic": "pikiosk/kids_kiosk/status"
+    }
+  ],
+  "availability_mode": "all",
+  "device": {
+    "identifiers": [
+      "pikiosk_kids_kiosk"
+    ],
+    "name": "Kids Kiosk",
+    "manufacturer": "DIY",
+    "model": "Raspberry Pi 5 Video Kiosk",
+    "sw_version": "1.0.0",
+    "hw_version": "Raspberry Pi 5 Model B Rev 1.0 / Touch Display 2",
+    "suggested_area": "Bedroom",
+    "configuration_url": "http://192.168.1.57:8090"
+  },
+  "origin": {
+    "name": "pi-kiosk",
+    "sw_version": "1.0.0",
+    "support_url": "https://github.com/owner/pi-kiosk"
+  },
+  "has_entity_name": true,
+  "qos": 1,
+  "name": "Extra dim",
+  "unique_id": "pikiosk_kids_kiosk_extra_dim",
+  "default_entity_id": "number.kids_kiosk_extra_dim",
+  "command_topic": "pikiosk/kids_kiosk/cmd/extra_dim",
+  "state_topic": "pikiosk/kids_kiosk/screen/state",
+  "value_template": "{{ value_json.extra_dim | int(0) }}",
+  "min": 0,
+  "max": 90,
+  "step": 5,
+  "mode": "slider",
+  "unit_of_measurement": "%",
+  "icon": "mdi:brightness-4"
+}

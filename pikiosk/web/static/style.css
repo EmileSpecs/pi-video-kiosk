@@ -347,6 +347,17 @@ body {
 .hotspot.bottom_left { bottom: 0; left: 0; }
 .hotspot.bottom_right { bottom: 0; right: 0; }
 
+/* Extra dim: darkens everything below what the backlight can do ------------- */
+
+.dim {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 100;
+}
+
 /* PIN pad ---------------------------------------------------------------- */
 
 .pinpad {

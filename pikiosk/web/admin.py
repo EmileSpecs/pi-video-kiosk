@@ -671,6 +671,7 @@ async def screen_post(request: web.Request) -> web.Response:
         screen = store.config.screen.model_copy(
             update={
                 "default_brightness": int(str(data.get("default_brightness"))),
+                "min_brightness": int(str(data.get("min_brightness") or store.config.screen.min_brightness)),
                 "sleep_timeout_min": int(str(data.get("sleep_timeout_min"))),
                 "orientation": str(data.get("orientation") or "landscape"),
                 "flip": data.get("flip") == "on",

@@ -177,7 +177,7 @@ class ScreenConfig(BaseModel):
     # 0 or null means automatic (older configs carry rotation: 0).
     rotation: Literal[0, 90, 180, 270] | None = None
     default_brightness: int = 70
-    min_brightness: int = 5
+    min_brightness: int = 1
     blank_method: Literal["backlight", "output", "both"] = "backlight"
     sleep_enabled: bool = True
     sleep_timeout_min: int = 10

@@ -55,6 +55,8 @@ The Catalog page takes a YouTube link or id, a playlist link or id, or a video f
 
 The Screen page picks the orientation. Landscape is the default: the Touch Display 2 is natively portrait and gets turned 90°, the original 7" display is natively landscape and is left alone, and "mounted upside down" adds 180°. The turn is applied by labwc's autostart before mpv and Chromium start, and again by `pikioskd` whenever the setting changes; `pikiosk-orient --print` shows the transform it would use.
 
+For a dark room, Home Assistant's **Extra dim** slider (0–90 %) goes below the backlight's dimmest setting by darkening the picture itself, like a phone's extra-dim mode: mpv lowers the video's contrast gain (black stays black) and the touch grid gets a black overlay. It works on top of Brightness and survives restarts. The Screen page's "Lowest backlight" (default 1 %) is the floor for Brightness.
+
 Home Assistant is the remote control: play, pause, stop, next, previous, volume, mute, screen, sleep, and the touch-UI lock. Next and previous move inside the playing playlist first (previous restarts the video when more than five seconds in) and only step through the catalog at its ends. Discovery creates those entities. `ha/packages/pikiosk.yaml` adds a universal media player and example automations. `ha/dashboards/pikiosk-card.yaml` is a Lovelace starting point. If `device.id` is not `kids_kiosk`, replace that id in both files.
 
 Useful MQTT checks from a computer with `mosquitto_sub`:

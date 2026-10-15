@@ -8,6 +8,7 @@ from typing import Any
 from pikiosk import __version__
 from pikiosk.config import KioskConfig
 from pikiosk.mqtt.topics import Topics
+from pikiosk.state import MAX_EXTRA_DIM
 
 
 @dataclass(frozen=True)
@@ -191,6 +192,23 @@ def build_component_payloads(
             "mode": "slider",
             "unit_of_measurement": "%",
             "icon": "mdi:brightness-6",
+        },
+        player=False,
+    )
+    add(
+        "number",
+        "extra_dim",
+        {
+            **_identity(config, "number", "extra_dim", "Extra dim"),
+            "command_topic": topics.command("extra_dim"),
+            "state_topic": topics.screen(),
+            "value_template": "{{ value_json.extra_dim | int(0) }}",
+            "min": 0,
+            "max": MAX_EXTRA_DIM,
+            "step": 5,
+            "mode": "slider",
+            "unit_of_measurement": "%",
+            "icon": "mdi:brightness-4",
         },
         player=False,
     )

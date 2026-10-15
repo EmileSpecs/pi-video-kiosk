@@ -15,7 +15,7 @@ from aiohttp import WSMsgType, web
 
 from pikiosk.catalog import VIDEO_ID_RE, CatalogError, parse_ref, thumbnail_url
 from pikiosk.controller import Controller
-from pikiosk.state import KioskState
+from pikiosk.state import KioskState, extra_dim_gain
 
 log = logging.getLogger("pikiosk.web")
 STATIC = Path(__file__).parent / "static"
@@ -35,6 +35,7 @@ def state_view(state: KioskState, version: str = "") -> dict[str, Any]:
         "selected": state.selected,
         "ui_locked": state.ui_locked,
         "screen_on": state.screen_on,
+        "dim": round(1 - extra_dim_gain(state.extra_dim), 3),
         "title": current.title if current else "",
         "volume": state.volume,
         "muted": state.muted,

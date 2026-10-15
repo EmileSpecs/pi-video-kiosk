@@ -272,7 +272,7 @@ screen:
   output_name: auto             # auto | DSI-1 | DSI-2
   rotation: 0                   # 0 | 90 | 180 | 270 (compositor transform)
   default_brightness: 70        # percent
-  min_brightness: 5             # percent; "on" never goes below this (avoid 'looks off but on')
+  min_brightness: 1             # percent; "on" never goes below this, and never below sysfs 1
   blank_method: backlight       # backlight | output | both (see section 9)
   sleep_enabled: true
   sleep_timeout_min: 10         # idle minutes before sleep (only when not playing)
@@ -972,7 +972,8 @@ Implementation notes for the HA YAML:
 4. Read `max_brightness` once (it varies: often 255 on the original 7" and a small range such as 31 on some TD2 kernels; never assume).
 
 ### 9.2 Mapping
-- HA brightness `b ∈ 1..255` maps to sysfs `max(round(b/255*max), ceil(min_brightness% * max))`. The reverse uses `actual_brightness` when available, otherwise the last written value.
+- HA brightness `b ∈ 1..255` maps to sysfs `max(round(b/255*max), ceil(min_brightness% * max), 1)`. The reverse uses `actual_brightness` when available, otherwise the last written value.
+- **Extra dim** (`number.<id>_extra_dim`, 0–90 %, persisted, published as `extra_dim` in the screen state) goes below the backlight's lowest step by darkening the picture: mpv `contrast` gain (black stays black) for video and a black overlay on the touch grid. The gain is `(1 − d/100)^(1/2.2)` so `d` is roughly the cut in light output.
 - **ON:** write `bl_power=0`, then `brightness=<mapped>`. With `blank_method` set to `output` or `both`, also run `wlr-randr --output <name> --on` (plus the transform if needed) **first**.
 - **OFF:** write `bl_power=4` (and optionally `brightness=0`). With `output` or `both`, also run `wlr-randr --output <name> --off`.
 - **Default `blank_method: backlight`.** Turning the Wayland output off can make the compositor re-layout windows and confuse Chromium or mpv sizes. Backlight-off is instant and keeps the windows intact. Keep `output` as an option for maximum power saving, and test it on both displays during M2.

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from pikiosk.screen.backlight import discover_backlight, map_brightness
-from pikiosk.state import PlayerState
+from pikiosk.state import KioskState, PlayerState, extra_dim_gain
 
 
 @pytest.mark.parametrize("maximum", [255, 31])
@@ -15,6 +15,52 @@ def test_brightness_mapping(maximum: int) -> None:
     assert full == maximum
     floor = math.ceil(0.05 * maximum)
     assert map_brightness(1, maximum, 5) == max(round(1 / 255 * maximum), floor)
+
+
+def test_on_reaches_the_lowest_backlight_step() -> None:
+    # Touch Display 2 reports max 31: 1 % must be step 1, not the old 5 % floor (2).
+    assert map_brightness(3, 31, 1) == 1
+    assert map_brightness(3, 31, 0) == 1  # never 0 while on
+    assert map_brightness(3, 31, 5) == 2
+
+
+def test_extra_dim_gain() -> None:
+    assert extra_dim_gain(0) == 1.0
+    assert extra_dim_gain(90) ** 2.2 == pytest.approx(0.1)  # 90 % less light
+    assert extra_dim_gain(500) == extra_dim_gain(90)
+
+
+async def test_extra_dim_darkens_video_and_grid(tmp_path, example_config, clock) -> None:
+    from pikiosk.mqtt.bridge import MqttBridge
+    from pikiosk.mqtt.memory import Incoming, MemoryTransport
+    from pikiosk.mqtt.state_payload import screen_payload
+    from pikiosk.persistence import StateStore
+    from pikiosk.web.server import state_view
+    from tests.conftest import make_controller
+
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    bridge = MqttBridge(example_config, controller, MemoryTransport(), clock, controller.store)
+    await bridge._on_message(Incoming("pikiosk/kids_kiosk/cmd/extra_dim", "70"))
+    assert controller.state.extra_dim == 70
+    assert player.properties["contrast"] == round((extra_dim_gain(70) - 1) * 100)
+    assert screen_payload(controller.state)["extra_dim"] == 70
+    assert state_view(controller.state)["dim"] == round(1 - extra_dim_gain(70), 3)
+
+    await controller.dispatch("set_extra_dim", {"percent": 200})
+    assert controller.state.extra_dim == 90  # clamped
+
+    # mpv restarts with default settings; the dim is applied again on connect.
+    player.properties.pop("contrast")
+    await controller.set_mpv_connected(True)
+    assert player.properties["contrast"] == round((extra_dim_gain(90) - 1) * 100)
+
+    store = StateStore(tmp_path / "state.json")
+    store.save(controller.state)
+    assert store.load(KioskState()).extra_dim == 90
+
+    await controller.dispatch("set_extra_dim", {"percent": 0})
+    assert player.properties["contrast"] == 0
+    assert state_view(controller.state)["dim"] == 0
 
 
 def test_discover_only_and_max(tmp_path: Path) -> None:

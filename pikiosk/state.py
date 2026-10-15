@@ -47,6 +47,7 @@ class KioskState:
     after_video: AfterVideo = AfterVideo.STOP
     screen_on: bool = True
     brightness: int = 178
+    extra_dim: int = 0  # 0..MAX_EXTRA_DIM percent darker than the backlight alone
     sleep_enabled: bool = True
     sleep_timeout_min: int = 10
     ui_locked: bool = False
@@ -61,5 +62,18 @@ class KioskState:
     mqtt_error: str | None = None
 
 
+MAX_EXTRA_DIM = 90
+
+
 def percent_to_ha(percent: int) -> int:
     return max(0, min(255, round(percent / 100 * 255)))
+
+
+def extra_dim_gain(percent: int) -> float:
+    """Signal multiplier that makes the picture `percent` darker to the eye.
+
+    Pixel values are gamma encoded, so light output goes roughly with the
+    value to the power 2.2; scaling values by this gain cuts light by `percent`.
+    """
+    percent = max(0, min(MAX_EXTRA_DIM, int(percent)))
+    return float((1 - percent / 100) ** (1 / 2.2))

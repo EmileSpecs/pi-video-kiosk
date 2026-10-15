@@ -14,6 +14,7 @@ PERSISTED = (
     "volume",
     "muted",
     "brightness",
+    "extra_dim",
     "screen_on",
     "sleep_enabled",
     "sleep_timeout_min",

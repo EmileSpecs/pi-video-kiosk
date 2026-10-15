@@ -55,7 +55,7 @@ screen:
   orientation: landscape   # landscape | portrait
   flip: false              # true when the panel is mounted upside down
   default_brightness: 70
-  min_brightness: 5
+  min_brightness: 1        # percent; the lowest the backlight goes while on
   blank_method: backlight
   sleep_enabled: true
   sleep_timeout_min: 10
