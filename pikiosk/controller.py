@@ -79,6 +79,7 @@ class Controller:
         self._append_task: asyncio.Task[None] | None = None
         self._managed_queue = False
         self._queued = 0  # playlist items mpv actually holds
+        self._stop_requested = False
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
@@ -211,8 +212,10 @@ class Controller:
             PlayerState.PAUSED,
             PlayerState.LOADING,
         }:
+            self._stop_requested = True
             await self.player.stop()
             await self.drain()
+            self._stop_requested = False
         self._load_generation += 1  # abandons a download or playlist append in flight
         self._set(replace(self.state, player=PlayerState.IDLE, now=None, last_error=None, download_progress=None))
         self.screen.note_activity()
@@ -441,24 +444,7 @@ class Controller:
         selected = self.state.selected
         if playable.catalog_name:
             selected = playable.catalog_name
-        thumb = playable.thumbnail
-        if not thumb and playable.video_id:
-            thumb = thumbnail_url(playable.video_id)
-        now = NowPlaying(
-            source=playable.source,
-            catalog_name=playable.catalog_name,
-            video_id=playable.video_id,
-            playlist_id=playable.playlist_id,
-            playlist_index=0,
-            playlist_count=playable.max_items if playable.playlist_id else 1,
-            title=playable.title,
-            duration=None,
-            position=0,
-            thumbnail_url=thumb,
-            local_file=playable.path if local or playable.source == "file" else None,
-        )
-        if playable.source == "file":
-            now = replace(now, local_file=playable.path)
+        now = self._now_for(playable, local_file=playable.path if local or playable.source == "file" else None)
         if not retrying:
             self._retries = 0
         self._last_playable = playable
@@ -519,6 +505,27 @@ class Controller:
         await self._start_file(path, playable.start, generation, playlist_items=len(ids))
         if len(ids) > 1 and not self._stale_generation(generation):
             self._append_task = asyncio.get_running_loop().create_task(self._append_rest(ids[1:], generation))
+
+    @staticmethod
+    def _now_for(playable: Playable, *, local_file: str | None = None) -> NowPlaying:
+        thumb = playable.thumbnail
+        if not thumb and playable.video_id:
+            thumb = thumbnail_url(playable.video_id)
+        if playable.source == "file":
+            local_file = playable.path
+        return NowPlaying(
+            source=playable.source,
+            catalog_name=playable.catalog_name,
+            video_id=playable.video_id,
+            playlist_id=playable.playlist_id,
+            playlist_index=0,
+            playlist_count=playable.max_items if playable.playlist_id else 1,
+            title=playable.title,
+            duration=None,
+            position=0,
+            thumbnail_url=thumb,
+            local_file=local_file,
+        )
 
     def _downloader(self) -> Any:
         if self.cache is not None:
@@ -715,7 +722,24 @@ class Controller:
             await self._on_property(str(event.get("name")), event.get("data"))
             return
         if name == "file-loaded":
-            self._set(replace(self.state, player=PlayerState.PLAYING, mpv_connected=True, download_progress=None))
+            now = self.state.now
+            if now is None and self._last_playable is not None:
+                # Something we started is playing but the state was cleared
+                # under it; rebuild what we know rather than show "playing"
+                # with no title.
+                log.warning("file-loaded without now-playing state; rebuilding from last request")
+                path = event.get("path")
+                local = str(path) if isinstance(path, str) and not path.startswith(("http://", "https://")) else None
+                now = self._now_for(self._last_playable, local_file=local)
+            self._set(
+                replace(
+                    self.state,
+                    player=PlayerState.PLAYING,
+                    now=now,
+                    mpv_connected=True,
+                    download_progress=None,
+                )
+            )
             current = self.state.now
             if current and current.video_id and self.cache is not None:
                 self.cache.mark_played(current.video_id)
@@ -791,7 +815,12 @@ class Controller:
 
     async def _on_end(self, reason: str, detail: str) -> None:
         if reason == "stop":
-            self._set(replace(self.state, player=PlayerState.IDLE, now=None))
+            # mpv reports "stop" for the file it drops on `loadfile replace`,
+            # `playlist-next` and `playlist-prev` as well as for an actual stop.
+            # Only the stop we asked for means idle; the rest are hand-overs and
+            # the file-loaded that follows carries the new state.
+            if self._stop_requested:
+                self._set(replace(self.state, player=PlayerState.IDLE, now=None))
             return
         if reason == "error":
             await self._on_error(detail or "playback failed")

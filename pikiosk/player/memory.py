@@ -27,6 +27,7 @@ class MemoryPlayer:
         self.playlist_count = 1
         self.playlist_index = 0
         self.entries: list[str] = []
+        self.active = False  # a file is open, so replacing it ends it with reason "stop"
 
     def add_listener(self, listener: PlayerListener) -> None:
         self._listeners.append(listener)
@@ -67,16 +68,21 @@ class MemoryPlayer:
             self.playlist_count = len(self.entries)
             self.emit({"event": "property-change", "name": "playlist-count", "data": self.playlist_count})
             return
+        if self.active:
+            # Exactly what mpv does on `loadfile … replace`.
+            self.emit({"event": "end-file", "reason": "stop"})
         if self.fail_next or self.failures_left:
             self.fail_next = False
             if self.failures_left:
                 self.failures_left -= 1
+            self.active = False
             self.emit({"event": "end-file", "reason": "error", "file_error": "loading failed"})
             return
         self.playlist_count = 3 if playlist else 1
         self.playlist_index = 0
         self.entries = [target] * self.playlist_count
         self.paused = False
+        self.active = True
         self.emit({"event": "file-loaded", "path": target})
         self.emit(
             {
@@ -92,6 +98,7 @@ class MemoryPlayer:
 
     async def stop(self) -> None:
         self.stopped += 1
+        self.active = False
         self.emit({"event": "end-file", "reason": "stop"})
 
     async def pause(self) -> None:
@@ -113,6 +120,7 @@ class MemoryPlayer:
         self.next_count += 1
         self.playlist_index += 1
         if self.playlist_index >= self.playlist_count:
+            self.active = False
             self.emit({"event": "end-file", "reason": "eof"})
         else:
             self._moved()
@@ -124,6 +132,8 @@ class MemoryPlayer:
             self._moved()
 
     def _moved(self) -> None:
+        # mpv ends the current file with reason "stop" when skipping on request.
+        self.emit({"event": "end-file", "reason": "stop"})
         self.emit({"event": "property-change", "name": "playlist-pos", "data": self.playlist_index})
         if self.playlist_index < len(self.entries):
             target = self.entries[self.playlist_index]
@@ -140,7 +150,9 @@ class MemoryPlayer:
         self.properties[name] = value
 
     async def simulate_eof(self) -> None:
+        self.active = False
         self.emit({"event": "end-file", "reason": "eof"})
 
     async def simulate_error(self, message: str = "loading failed") -> None:
+        self.active = False
         self.emit({"event": "end-file", "reason": "error", "file_error": message})

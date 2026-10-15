@@ -345,6 +345,71 @@ async def test_next_and_previous_move_inside_the_playlist(tmp_path: Path, exampl
     assert controller.state.selected == "Baby Shark"
 
 
+async def test_replacing_a_playing_item_keeps_now_playing(tmp_path: Path, example_config, clock: FakeClock) -> None:
+    """mpv ends the replaced file with reason "stop"; that must not blank the new item."""
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    ids = ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"]
+    cache = FakeCache(downloads={video_id: _media(tmp_path, video_id) for video_id in ids + [BABY]})
+    controller.cache = cache
+    controller.ytdlp = FakeYtDlp({"PLxxxxxxxxxxxxxxxxxxxxxxxxxxxx": ids})  # type: ignore[assignment]
+
+    # The reported sequence: play, next, then pick a playlist while it plays.
+    await controller.dispatch("select", {"name": "Baby Shark"})
+    assert player.active
+    await controller.dispatch("next", {})
+    assert controller.state.player == PlayerState.PLAYING
+    assert controller.state.now is not None and controller.state.now.title == "Sesame Street Songs"
+    assert controller._append_task is not None
+    await controller._append_task
+    await controller.dispatch("select", {"name": "Sesame Street Songs"})
+    assert controller._append_task is not None
+    await controller._append_task
+
+    assert controller.state.player == PlayerState.PLAYING
+    now = controller.state.now
+    assert now is not None
+    assert now.title == "Sesame Street Songs"
+    assert now.video_id == "aaaaaaaaaaa"
+    assert now.thumbnail_url
+    assert player.stopped == 0  # nothing asked mpv to stop
+
+    # Moving inside the playlist also ends the old file with "stop".
+    await controller.dispatch("next", {})
+    assert controller.state.player == PlayerState.PLAYING
+    assert controller.state.now is not None and controller.state.now.playlist_index == 1
+
+    # A real stop still goes idle.
+    await controller.dispatch("stop", {})
+    assert controller.state.player == PlayerState.IDLE
+    assert controller.state.now is None
+    assert player.stopped == 1
+
+
+async def test_file_loaded_rebuilds_now_playing_if_it_was_cleared(
+    tmp_path: Path, example_config, clock: FakeClock
+) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    cache = FakeCache(files={BABY: _media(tmp_path, BABY)})
+    controller.cache = cache
+    controller.cache_lookup = cache.get
+    await controller.dispatch("select", {"name": "Baby Shark"})
+    # A stray late "stop" (an actual stop that raced a new load) wipes the state...
+    controller._stop_requested = True
+    player.emit({"event": "end-file", "reason": "stop"})
+    await controller.drain()
+    controller._stop_requested = False
+    assert controller.state.now is None
+    # ...but mpv then tells us the file we asked for is playing.
+    player.emit({"event": "file-loaded", "path": cache.files[BABY]})
+    await controller.drain()
+    assert controller.state.player == PlayerState.PLAYING
+    now = controller.state.now
+    assert now is not None
+    assert now.title == "Baby Shark"
+    assert now.video_id == BABY
+    assert now.local_file == cache.files[BABY]
+
+
 async def test_next_waits_for_an_item_still_downloading(tmp_path: Path, example_config, clock: FakeClock) -> None:
     controller, player, _screen = make_controller(tmp_path, example_config, clock)
     ids = ["aaaaaaaaaaa", "bbbbbbbbbbb"]

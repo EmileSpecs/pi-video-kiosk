@@ -113,6 +113,14 @@ class FakeMpvServer:
             return {"error": "success"}
         if name == "loadfile":
             target = str(command[1])
+            was_playing = not self.properties.get("idle-active", True)
+            if len(command) > 2 and command[2] == "append":
+                self.playlist.append(target)
+                self.properties["playlist-count"] = len(self.playlist)
+                return {"error": "success"}
+            if was_playing:
+                # Like mpv: the replaced file ends with reason "stop" first.
+                asyncio.get_running_loop().create_task(self._event({"event": "end-file", "reason": "stop"}))
             self.properties["path"] = target
             self.properties["idle-active"] = False
             self.properties["pause"] = False
