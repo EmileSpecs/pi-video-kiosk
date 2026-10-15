@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import time
@@ -53,6 +54,7 @@ class CacheManager:
         self.streaming = False
         self.progress: dict[str, float] = {}
         self.protected: set[str] = set()
+        self.pending_titles: dict[str, str] = {}  # learned from playlist scans before the download
         self._inflight: dict[str, asyncio.Task[tuple[str | None, str]]] = {}
         self._watchers: dict[str, list[ProgressHook]] = {}
         self.load()
@@ -100,17 +102,23 @@ class CacheManager:
     async def _fetch(self, video_id: str, url: str | None) -> tuple[str | None, str]:
         self.progress[video_id] = 0.0
         target = url or f"https://www.youtube.com/watch?v={video_id}"
+        title: str | None = None
         try:
-            paths, err = await self.ytdlp.download_media(
-                target,
-                self.config.playback.ytdl_format,
-                str(self.directory),
-                playlist=False,
-                limit=None,
-                progress=lambda percent: self._report(video_id, percent),
-                timeout=self.config.playback.download_timeout_s,
-                rate_limit=self.config.offline.rate_limit,
-            )
+            options: dict[str, Any] = {
+                "playlist": False,
+                "limit": None,
+                "progress": lambda percent: self._report(video_id, percent),
+                "timeout": self.config.playback.download_timeout_s,
+                "rate_limit": self.config.offline.rate_limit,
+            }
+            fmt = self.config.playback.ytdl_format
+            download = getattr(self.ytdlp, "download", None)
+            if download is not None:
+                files, err = await download(target, fmt, str(self.directory), **options)
+                paths = [item.path for item in files]
+                title = files[0].title if files else None
+            else:
+                paths, err = await self.ytdlp.download_media(target, fmt, str(self.directory), **options)
         except Exception as exc:  # a crashed subprocess must not wedge playback
             log.warning("download crashed id=%s error=%s", video_id, exc)
             paths, err = [], str(exc)
@@ -121,7 +129,7 @@ class CacheManager:
             self._watchers.pop(video_id, None)
             log.warning("download failed id=%s detail=%s", video_id, err.strip()[:200])
             return None, err
-        self.register(video_id, paths[0])
+        self.register(video_id, paths[0], title=title)
         self._report(video_id, 100.0)
         self._watchers.pop(video_id, None)
         return paths[0], ""
@@ -142,10 +150,11 @@ class CacheManager:
         except OSError:
             size = 0
         previous = self.entries.get(video_id)
+        known = self.pending_titles.pop(video_id, None)
         self.entries[video_id] = CacheEntry(
             video_id=video_id,
             path=str(file),
-            title=title or (previous.title if previous else video_id),
+            title=title or known or (previous.title if previous else video_id),
             duration=previous.duration if previous else None,
             thumbnail=previous.thumbnail if previous else None,
             size=size,
@@ -153,6 +162,66 @@ class CacheManager:
             downloaded_at=time.time(),
         )
         self._evict(self.protected | {video_id})
+        try:
+            self.save()
+        except OSError:
+            log.warning("could not write cache index", exc_info=True)
+
+    def title_for(self, video_id: str) -> str | None:
+        """The video's YouTube title, or None when all we have is its id."""
+        entry = self.entries.get(video_id)
+        if entry is not None and entry.title and entry.title != video_id:
+            return entry.title
+        return self.pending_titles.get(video_id)
+
+    def note_titles(self, entries: list[dict[str, Any]]) -> None:
+        """Remember titles a playlist scan returned; they are free and cover the cache."""
+        changed = False
+        for item in entries:
+            video_id = str(item.get("id") or "")
+            title = str(item.get("title") or "").strip()
+            if not video_id or not title or title == video_id:
+                continue
+            entry = self.entries.get(video_id)
+            if entry is None:
+                self.pending_titles[video_id] = title
+            elif entry.title != title and entry.title in {"", video_id}:
+                self.entries[video_id] = _with_title(entry, title)
+                changed = True
+        if changed:
+            self._save_quietly()
+
+    async def fetch_title(self, video_id: str) -> str | None:
+        """Ask YouTube for the title of a video cached before titles were kept."""
+        known = self.title_for(video_id)
+        if known:
+            return known
+        lookup = getattr(self.ytdlp, "title", None)
+        if lookup is None:
+            return None
+        try:
+            title = await lookup(video_id)
+        except Exception as exc:
+            log.debug("title lookup failed id=%s error=%s", video_id, exc)
+            return None
+        if not title or title == video_id:
+            return None
+        entry = self.entries.get(video_id)
+        if entry is not None:
+            self.entries[video_id] = _with_title(entry, title)
+            self._save_quietly()
+        else:
+            self.pending_titles[video_id] = title
+        return str(title)
+
+    async def _backfill_titles(self, video_ids: list[str]) -> None:
+        for video_id in video_ids:
+            if self.streaming:
+                return
+            if video_id in self.entries and self.title_for(video_id) is None:
+                await self.fetch_title(video_id)
+
+    def _save_quietly(self) -> None:
         try:
             self.save()
         except OSError:
@@ -188,6 +257,7 @@ class CacheManager:
             for item in items:
                 if item.get("type") == "playlist" and item.get("id"):
                     entries = await self.ytdlp.flat_playlist(str(item["id"]), int(item.get("max_items") or 50))
+                    self.note_titles(entries)
                     for entry in entries:
                         video_id = str(entry.get("id") or "")
                         if video_id and video_id not in wanted:
@@ -200,6 +270,7 @@ class CacheManager:
                 log.info("pre-cached id=%s", video_id)
             else:
                 log.info("pre-cache skipped id=%s reason=%s", video_id, err.strip()[:120])
+        await self._backfill_titles(wanted)
 
     def load(self) -> None:
         if not self.index_path.exists():
@@ -283,6 +354,7 @@ class CacheManager:
                     str(item["id"]),
                     int(item.get("max_items") or 50),
                 )
+                self.note_titles(entries)
                 for entry in entries:
                     video_id = str(entry.get("id") or "")
                     if video_id and video_id not in wanted:
@@ -294,6 +366,7 @@ class CacheManager:
             if self.get(video_id):
                 continue
             await self.ensure(video_id)
+        await self._backfill_titles(wanted)
         self._evict(set(wanted))
         self._forget_removed(set(wanted))
         self.save()
@@ -311,16 +384,7 @@ class CacheManager:
     def mark_played(self, video_id: str) -> None:
         entry = self.entries.get(video_id)
         if entry:
-            self.entries[video_id] = CacheEntry(
-                video_id=entry.video_id,
-                path=entry.path,
-                title=entry.title,
-                duration=entry.duration,
-                thumbnail=entry.thumbnail,
-                size=entry.size,
-                last_played=time.time(),
-                downloaded_at=entry.downloaded_at,
-            )
+            self.entries[video_id] = dataclasses.replace(entry, last_played=time.time())
 
     def _evict(self, protected: set[str]) -> None:
         limit = int(self.config.offline.max_size_gb * 1024 * 1024 * 1024)
@@ -353,6 +417,10 @@ class CacheManager:
         path = Path(entry.path)
         if path.exists():
             path.unlink()
+
+
+def _with_title(entry: CacheEntry, title: str) -> CacheEntry:
+    return dataclasses.replace(entry, title=title)
 
 
 def _parse_hhmm(value: str) -> dtime:

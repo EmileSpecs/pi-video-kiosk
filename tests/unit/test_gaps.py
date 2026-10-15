@@ -611,6 +611,7 @@ async def test_cache_and_ytdlp(
         (0, b'{"entries":[{"id":"aaaaaaaaaaa"}]}', b""),
         (0, b"", b""),
         (1, b"", b"network down"),
+        (0, b"Bath Song\n", b""),  # title backfill for the file downloaded without one
         (0, b"2026.01.01\n", b""),
         (1, b"", b"nope"),
         (0, b'{"id":"abc"}', b""),
@@ -687,6 +688,7 @@ async def test_cache_and_ytdlp(
     # entry then hits the "network down" reply.
     assert manager.get("WRVsOCh907o")
     assert manager.get("aaaaaaaaaaa") is None
+    assert manager.title_for("WRVsOCh907o") == "Bath Song"
     manager.mark_played("WRVsOCh907o")
     manager.mark_played("missing")
     await ytdlp.version()

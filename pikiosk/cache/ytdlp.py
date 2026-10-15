@@ -22,6 +22,14 @@ class ResolvedStream:
     headers: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Download:
+    """A media file yt-dlp wrote, with the title YouTube gave the video."""
+
+    path: str
+    title: str | None = None
+
+
 def ytdlp_command() -> list[str]:
     override = os.environ.get("PIKIOSK_YTDLP")
     for candidate in (override, "/opt/pi-kiosk/venv/bin/yt-dlp", shutil.which("yt-dlp")):
@@ -181,6 +189,15 @@ class YtDlp:
             return []
         return [item for item in entries if isinstance(item, dict)]
 
+    async def title(self, video_id: str) -> str | None:
+        """The video's title without downloading anything (one metadata request)."""
+        args = ["--quiet", "--no-warnings", "--no-playlist", "--skip-download", "--print", "title", video_id]
+        code, out, _err = await self.run(args)
+        if code != 0:
+            return None
+        lines = [line.strip() for line in out.splitlines() if line.strip()]
+        return lines[-1] if lines else None
+
     async def dump_json(self, video_id: str) -> dict[str, Any] | None:
         code, out, _err = await self.run(["-J", "--no-playlist", video_id])
         if code != 0:
@@ -252,7 +269,32 @@ class YtDlp:
         timeout: float | None = None,
         rate_limit: str | None = None,
     ) -> tuple[list[str], str]:
-        """Save a real media file and return its path.
+        """Save a real media file and return its path; see download() for titles."""
+        files, err = await self.download(
+            url,
+            fmt,
+            directory,
+            playlist=playlist,
+            limit=limit,
+            progress=progress,
+            timeout=timeout,
+            rate_limit=rate_limit,
+        )
+        return [item.path for item in files], err
+
+    async def download(
+        self,
+        url: str,
+        fmt: str,
+        directory: str,
+        *,
+        playlist: bool = False,
+        limit: int | None = None,
+        progress: ProgressHook | None = None,
+        timeout: float | None = None,
+        rate_limit: str | None = None,
+    ) -> tuple[list[Download], str]:
+        """Save a real media file and return its path and title.
 
         mpv cannot open the separate, client-bound streams YouTube serves.
         yt-dlp downloads them, merges picture and sound into one MKV, and mpv
@@ -267,14 +309,14 @@ class YtDlp:
             "timeout": timeout,
             "rate_limit": rate_limit,
         }
-        paths, err = await self._download_once(url, fmt, folder, **options)
-        if paths:
-            return paths, ""
+        files, err = await self._download_once(url, fmt, folder, **options)
+        if files:
+            return files, ""
         if fmt != "18/b" and _download_should_retry(err):
             log.info("download retry with format 18 reason=%s", err.strip()[:160])
-            paths, retry_err = await self._download_once(url, "18/b", folder, **options)
-            if paths:
-                return paths, ""
+            files, retry_err = await self._download_once(url, "18/b", folder, **options)
+            if files:
+                return files, ""
             return [], (retry_err or err).strip()
         return [], err.strip()
 
@@ -289,7 +331,7 @@ class YtDlp:
         progress: ProgressHook | None,
         timeout: float | None,
         rate_limit: str | None,
-    ) -> tuple[list[str], str]:
+    ) -> tuple[list[Download], str]:
         args = [
             "-f",
             fmt,
@@ -301,8 +343,12 @@ class YtDlp:
             "--progress",
             "-o",
             str(folder / "%(id)s.%(ext)s"),
+            # Once the file is in place yt-dlp prints its path, then the title
+            # as a JSON string on the next line (the file is named by id).
             "--print",
             "after_move:filepath",
+            "--print",
+            f"after_move:{TITLE_PREFIX}%(title)j",
         ]
         if rate_limit:
             args.extend(["--limit-rate", rate_limit])
@@ -320,13 +366,40 @@ class YtDlp:
                 progress(percent)
 
         code, out, err = await self.run_streaming(args, on_line=on_line, timeout=timeout)
-        paths = [line.strip() for line in out.splitlines() if line.strip() and Path(line.strip()).is_file()]
-        if code != 0 or not paths:
+        files = parse_downloads(out)
+        if code != 0 or not files:
             detail = (err or _last_error_line(out) or "yt-dlp did not write a file").strip()
             return [], detail
         if progress is not None:
             progress(100.0)
-        return paths, ""
+        return files, ""
+
+
+TITLE_PREFIX = "title:"
+
+
+def parse_downloads(out: str) -> list[Download]:
+    """Pair each printed file path with the title line that follows it."""
+    files: list[Download] = []
+    expect_title = False
+    for raw in out.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(TITLE_PREFIX):
+            if expect_title:
+                expect_title = False
+                try:
+                    title = json.loads(line[len(TITLE_PREFIX) :])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(title, str) and title.strip():
+                    files[-1] = Download(files[-1].path, title.strip())
+            continue
+        if Path(line).is_file():
+            files.append(Download(line))
+            expect_title = True
+    return files
 
 
 def _last_error_line(out: str) -> str:

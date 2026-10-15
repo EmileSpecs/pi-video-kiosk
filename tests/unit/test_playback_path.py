@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from pikiosk.cache.cache_manager import CacheManager
-from pikiosk.cache.ytdlp import YtDlp, classify_error, parse_progress
+from pikiosk.cache.ytdlp import Download, YtDlp, classify_error, parse_downloads, parse_progress
 from pikiosk.clock import FakeClock
 from pikiosk.player.mpv_player import OBSERVED, MpvPlayer
 from pikiosk.state import KioskState, PlayerState
@@ -32,9 +32,18 @@ class FakeCache:
         self.played: list[str] = []
         self.forgotten: list[str] = []
         self.block: asyncio.Event | None = None
+        self.titles: dict[str, str] = {}
 
     def get(self, video_id: str) -> str | None:
         return self.files.get(video_id)
+
+    def title_for(self, video_id: str) -> str | None:
+        return self.titles.get(video_id)
+
+    def note_titles(self, entries: list[dict[str, Any]]) -> None:
+        for entry in entries:
+            if entry.get("id") and entry.get("title") and entry["title"] != entry["id"]:
+                self.titles[str(entry["id"])] = str(entry["title"])
 
     async def ensure(self, video_id: str, url: str | None = None, *, progress: Any = None) -> tuple[str | None, str]:
         self.calls.append(video_id)
@@ -63,11 +72,15 @@ class FakeCache:
 
 
 class FakeYtDlp:
-    def __init__(self, playlists: dict[str, list[str]] | None = None) -> None:
+    def __init__(self, playlists: dict[str, list[str]] | None = None, titles: dict[str, str] | None = None) -> None:
         self.playlists = playlists or {}
+        self.titles = titles or {}
 
     async def flat_playlist(self, playlist_id: str, limit: int) -> list[dict[str, Any]]:
-        return [{"id": video_id} for video_id in self.playlists.get(playlist_id, [])[:limit]]
+        return [
+            {"id": video_id, "title": self.titles.get(video_id, video_id)}
+            for video_id in self.playlists.get(playlist_id, [])[:limit]
+        ]
 
 
 def _media(tmp_path: Path, name: str) -> str:
@@ -103,12 +116,13 @@ target.write_bytes(b"0123456789")
 print("[download]  25.0% of 10.00B at 1.00B/s ETA 00:05", flush=True)
 print("[download] 100% of 10.00B in 00:00:00 at 1.00B/s", flush=True)
 print(target)
+print('title:"Baby Shark Dance | #babyshark"')
 """,
         encoding="utf-8",
     )
     ytdlp = YtDlp([sys.executable, str(script)])
     seen: list[float] = []
-    paths, err = await ytdlp.download_media(
+    files, err = await ytdlp.download(
         "https://www.youtube.com/watch?v=XqZsoesa55w",
         "18/b",
         str(tmp_path / "cache"),
@@ -116,8 +130,13 @@ print(target)
         timeout=20,
     )
     assert err == ""
-    assert paths == [str(tmp_path / "cache" / "XqZsoesa55w.mkv")]
+    assert [item.path for item in files] == [str(tmp_path / "cache" / "XqZsoesa55w.mkv")]
+    assert files[0].title == "Baby Shark Dance | #babyshark"
     assert seen[:2] == [25.0, 100.0]
+    paths, err = await ytdlp.download_media(
+        "https://www.youtube.com/watch?v=XqZsoesa55w", "18/b", str(tmp_path / "cache"), timeout=20
+    )
+    assert paths == [str(tmp_path / "cache" / "XqZsoesa55w.mkv")]
     slow = YtDlp([sys.executable, str(script), "--hang"])
     paths, err = await slow.download_media(
         "https://www.youtube.com/watch?v=XqZsoesa55w",
@@ -128,6 +147,74 @@ print(target)
     assert paths == []
     assert "timed out" in err
     assert classify_error(err) == "network"
+
+
+def test_parse_downloads_pairs_paths_with_titles(tmp_path: Path) -> None:
+    first = _media(tmp_path, "aaaaaaaaaaa")
+    second = _media(tmp_path, "bbbbbbbbbbb")
+    out = "\n".join(
+        [
+            "[download] 100% of 1.00B",
+            first,
+            'title:"First \\u2013 song"',
+            second,
+            "title:not json",
+            'title:"orphan"',
+        ]
+    )
+    files = parse_downloads(out)
+    assert [(item.path, item.title) for item in files] == [(first, "First – song"), (second, None)]
+
+
+async def test_cache_keeps_titles_from_downloads_and_playlist_scans(
+    tmp_path: Path, example_config, clock: FakeClock
+) -> None:
+    class _Yt:
+        def __init__(self) -> None:
+            self.lookups: list[str] = []
+
+        async def download(self, url: str, fmt: str, directory: str, **kwargs: Any) -> tuple[list[Download], str]:
+            video_id = url.split("v=")[-1]
+            target = Path(directory) / f"{video_id}.mkv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x")
+            title = "Baby Shark Dance" if video_id == BABY else None
+            return [Download(str(target), title)], ""
+
+        async def flat_playlist(self, playlist_id: str, limit: int) -> list[dict[str, Any]]:
+            return [{"id": BATH, "title": "Bath Song"}, {"id": "ppppppppppp", "title": "Playlist Only"}]
+
+        async def title(self, video_id: str) -> str | None:
+            self.lookups.append(video_id)
+            return "Looked Up" if video_id == "ooooooooooo" else None
+
+    config = example_config.model_copy(
+        update={"offline": example_config.offline.model_copy(update={"directory": str(tmp_path / "cache")})}
+    )
+    ytdlp = _Yt()
+    manager = CacheManager(config, ytdlp, clock)  # type: ignore[arg-type]
+    # A file cached before titles were kept.
+    (tmp_path / "cache").mkdir()
+    old = _media(tmp_path / "cache", "ooooooooooo")
+    manager.register("ooooooooooo", old)
+    assert manager.title_for("ooooooooooo") is None
+
+    await manager.ensure(BABY)
+    assert manager.title_for(BABY) == "Baby Shark Dance"  # printed by yt-dlp
+    await manager.ensure(BATH)
+    assert manager.title_for(BATH) is None  # nothing printed, not scanned yet
+
+    await manager.sync(config.catalog_items() + [{"type": "video", "id": "ooooooooooo"}], force=True)
+    assert manager.title_for(BATH) == "Bath Song"  # filled in from the playlist scan
+    assert manager.title_for("ppppppppppp") == "Playlist Only"
+    assert manager.title_for("ooooooooooo") == "Looked Up"  # backfilled with one request
+    assert ytdlp.lookups == ["ooooooooooo"]
+
+    reloaded = CacheManager(config, ytdlp, clock)  # type: ignore[arg-type]
+    assert reloaded.title_for(BATH) == "Bath Song"
+    assert reloaded.title_for("ooooooooooo") == "Looked Up"
+    assert await reloaded.fetch_title(BATH) == "Bath Song"  # no second request
+    assert ytdlp.lookups == ["ooooooooooo"]
 
 
 async def test_cache_manager_shares_inflight_downloads(tmp_path: Path, example_config, clock: FakeClock) -> None:
@@ -383,6 +470,53 @@ async def test_replacing_a_playing_item_keeps_now_playing(tmp_path: Path, exampl
     assert controller.state.player == PlayerState.IDLE
     assert controller.state.now is None
     assert player.stopped == 1
+
+
+async def test_titles_come_from_youtube_not_file_names(tmp_path: Path, example_config, clock: FakeClock) -> None:
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    ids = ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"]
+    cache = FakeCache(downloads={video_id: _media(tmp_path, video_id) for video_id in ids})
+    controller.cache = cache
+    titles = {"aaaaaaaaaaa": "Elmo's Song", "bbbbbbbbbbb": "Rubber Duckie"}
+    controller.ytdlp = FakeYtDlp({"PLxxxxxxxxxxxxxxxxxxxxxxxxxxxx": ids}, titles)  # type: ignore[assignment]
+    await controller.dispatch("select", {"name": "Sesame Street Songs"})
+    assert controller._append_task is not None
+    await controller._append_task
+    now = controller.state.now
+    assert now is not None
+    assert now.catalog_name == "Sesame Street Songs"
+    assert now.title == "Elmo's Song"  # the scan's title, not the catalog name
+
+    # mpv reports the cached file's name as media-title; that is never a title.
+    player.emit({"event": "property-change", "name": "media-title", "data": "aaaaaaaaaaa.mkv"})
+    await controller.drain()
+    assert controller.state.now is not None and controller.state.now.title == "Elmo's Song"
+
+    await controller.dispatch("next", {})
+    now = controller.state.now
+    assert now is not None and now.video_id == "bbbbbbbbbbb"
+    assert now.title == "Rubber Duckie"  # follows the item mpv moved to
+
+    await controller.dispatch("next", {})
+    now = controller.state.now
+    assert now is not None and now.video_id == "ccccccccccc"
+    assert now.title == "Sesame Street Songs"  # unknown title: catalog name, not the old title
+    player.emit({"event": "property-change", "name": "media-title", "data": "ccccccccccc.mkv"})
+    await controller.drain()
+    assert controller.state.now is not None and controller.state.now.title == "Sesame Street Songs"
+
+
+async def test_single_video_title_from_cache(tmp_path: Path, example_config, clock: FakeClock) -> None:
+    controller, _player, _screen = make_controller(tmp_path, example_config, clock)
+    cache = FakeCache(files={BABY: _media(tmp_path, BABY)})
+    cache.titles[BABY] = "Baby Shark Dance"
+    controller.cache = cache
+    controller.cache_lookup = cache.get
+    await controller.dispatch("select", {"name": "Baby Shark"})
+    now = controller.state.now
+    assert now is not None
+    assert now.catalog_name == "Baby Shark"
+    assert now.title == "Baby Shark Dance"
 
 
 async def test_file_loaded_rebuilds_now_playing_if_it_was_cleared(

@@ -26,6 +26,14 @@ log = logging.getLogger("pikiosk.controller")
 Listener = Callable[[KioskState], None]
 Hook = Callable[[], Awaitable[None] | None]
 
+MEDIA_SUFFIXES = {".mkv", ".mp4", ".webm", ".m4a", ".part"}
+
+
+def _looks_like_cache_file(title: str) -> bool:
+    """True for `<video id>.mkv`, the name yt-dlp gives cached files."""
+    name = Path(title)
+    return name.suffix.lower() in MEDIA_SUFFIXES and len(name.stem) == 11 and bool(VIDEO_ID_RE.match(name.stem))
+
 
 class Controller:
     def __init__(
@@ -80,6 +88,7 @@ class Controller:
         self._managed_queue = False
         self._queued = 0  # playlist items mpv actually holds
         self._stop_requested = False
+        self._title_tasks: set[asyncio.Task[None]] = set()
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
         base = self._base_state()
@@ -469,6 +478,8 @@ class Controller:
             lambda: self._load_timed_out(generation),
         )
         if playable.path:
+            if local and playable.video_id:
+                self._apply_title(playable.video_id, generation)
             await self._start_file(playable.path, playable.start, generation)
             return
         if self._downloader() is None:
@@ -502,9 +513,47 @@ class Controller:
         if not path:
             await self._on_error(err or "download failed")
             return
+        self._apply_title(ids[0], generation)
         await self._start_file(path, playable.start, generation, playlist_items=len(ids))
         if len(ids) > 1 and not self._stale_generation(generation):
             self._append_task = asyncio.get_running_loop().create_task(self._append_rest(ids[1:], generation))
+
+    def _title_for(self, video_id: str | None) -> str | None:
+        """The real YouTube title when the cache knows it."""
+        if not video_id or self.cache is None:
+            return None
+        lookup = getattr(self.cache, "title_for", None)
+        if lookup is None:
+            return None
+        title = lookup(video_id)
+        return str(title) if title else None
+
+    def _apply_title(self, video_id: str, generation: int) -> None:
+        """Show the video's title; look it up in the background if the cache lacks it."""
+        current = self.state.now
+        if current is None or self._stale_generation(generation):
+            return
+        title = self._title_for(video_id)
+        if title:
+            if title != current.title:
+                self._set(replace(self.state, now=replace(current, title=title)))
+            return
+        fetch = getattr(self.cache, "fetch_title", None)
+        if fetch is None:
+            return
+        task = asyncio.get_running_loop().create_task(self._refresh_title(video_id, fetch))
+        self._title_tasks.add(task)
+        task.add_done_callback(self._title_tasks.discard)
+
+    async def _refresh_title(self, video_id: str, fetch: Any) -> None:
+        try:
+            title = await fetch(video_id)
+        except Exception as exc:
+            log.debug("title lookup failed id=%s error=%s", video_id, exc)
+            return
+        current = self.state.now
+        if title and current is not None and current.video_id == video_id and current.title != title:
+            self._set(replace(self.state, now=replace(current, title=str(title))))
 
     @staticmethod
     def _now_for(playable: Playable, *, local_file: str | None = None) -> NowPlaying:
@@ -553,6 +602,9 @@ class Controller:
         except Exception as exc:
             log.warning("playlist expand failed id=%s error=%s", playable.playlist_id, exc)
             return []
+        note = getattr(self.cache, "note_titles", None)
+        if note is not None:
+            note(entries)  # the scan already carries every title; keep them
         ids: list[str] = []
         for entry in entries:
             video_id = str(entry.get("id") or "")
@@ -731,6 +783,7 @@ class Controller:
                 path = event.get("path")
                 local = str(path) if isinstance(path, str) and not path.startswith(("http://", "https://")) else None
                 now = self._now_for(self._last_playable, local_file=local)
+                now = replace(now, title=self._title_for(now.video_id) or now.title)
             self._set(
                 replace(
                     self.state,
@@ -760,7 +813,11 @@ class Controller:
         if current is None:
             return
         if name == "media-title" and isinstance(data, str) and data:
-            # A cached MKV reports its file name as the title; keep the catalog name.
+            # A cached MKV has no title tag, so mpv reports its file name
+            # (<video id>.mkv). The cache knows the real title; otherwise the
+            # catalog name is still better than a random string.
+            if self._title_for(current.video_id) or _looks_like_cache_file(data):
+                return
             if current.local_file and Path(data).name == Path(current.local_file).name:
                 return
             self._set(replace(self.state, now=replace(current, title=data)))
@@ -802,16 +859,22 @@ class Controller:
         if video_id == current.video_id and local_file == current.local_file:
             return
         thumb = current.thumbnail_url
+        title = current.title
         if current.playlist_id or not thumb:
             # Playlists show the current video's picture; a single video keeps
             # whatever the catalog chose for it.
             thumb = thumbnail_url(video_id)
+        if video_id != current.video_id:
+            # The old item's title must not linger on the new one.
+            title = self._title_for(video_id) or current.catalog_name or video_id
         self._set(
             replace(
                 self.state,
-                now=replace(current, video_id=video_id, local_file=local_file, thumbnail_url=thumb),
+                now=replace(current, video_id=video_id, local_file=local_file, thumbnail_url=thumb, title=title),
             )
         )
+        if video_id != current.video_id:
+            self._apply_title(video_id, self._load_generation)
 
     async def _on_end(self, reason: str, detail: str) -> None:
         if reason == "stop":
