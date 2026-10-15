@@ -26,14 +26,13 @@
   "qos": 1,
   "name": "Extra dim",
   "unique_id": "pikiosk_kids_kiosk_extra_dim",
-  "default_entity_id": "number.kids_kiosk_extra_dim",
+  "default_entity_id": "switch.kids_kiosk_extra_dim",
   "command_topic": "pikiosk/kids_kiosk/cmd/extra_dim",
   "state_topic": "pikiosk/kids_kiosk/screen/state",
-  "value_template": "{{ value_json.extra_dim | int(0) }}",
-  "min": 0,
-  "max": 90,
-  "step": 5,
-  "mode": "slider",
-  "unit_of_measurement": "%",
-  "icon": "mdi:brightness-4"
+  "value_template": "{{ value_json.extra_dim | default('OFF') }}",
+  "payload_on": "ON",
+  "payload_off": "OFF",
+  "state_on": "ON",
+  "state_off": "OFF",
+  "icon": "mdi:weather-night"
 }

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from pikiosk.screen.backlight import discover_backlight, map_brightness
-from pikiosk.state import KioskState, PlayerState, extra_dim_gain
+from pikiosk.state import KioskState, PlayerState, percent_to_ha, picture_gain
 
 
 @pytest.mark.parametrize("maximum", [255, 31])
@@ -24,13 +24,15 @@ def test_on_reaches_the_lowest_backlight_step() -> None:
     assert map_brightness(3, 31, 5) == 2
 
 
-def test_extra_dim_gain() -> None:
-    assert extra_dim_gain(0) == 1.0
-    assert extra_dim_gain(90) ** 2.2 == pytest.approx(0.1)  # 90 % less light
-    assert extra_dim_gain(500) == extra_dim_gain(90)
+def test_picture_gain() -> None:
+    assert picture_gain(KioskState(extra_dim=False, dim_level=1)) == 1.0
+    assert picture_gain(KioskState(extra_dim=True, dim_level=100)) == 1.0  # backlight minimum alone
+    assert picture_gain(KioskState(extra_dim=True, dim_level=1)) ** 2.2 == pytest.approx(0.1)
+    dimmest = picture_gain(KioskState(extra_dim=True, dim_level=1))
+    assert picture_gain(KioskState(extra_dim=True, dim_level=-5)) == dimmest
 
 
-async def test_extra_dim_darkens_video_and_grid(tmp_path, example_config, clock) -> None:
+async def test_extra_dim_turns_the_brightness_slider_into_a_dimmer(tmp_path, example_config, clock) -> None:
     from pikiosk.mqtt.bridge import MqttBridge
     from pikiosk.mqtt.memory import Incoming, MemoryTransport
     from pikiosk.mqtt.state_payload import screen_payload
@@ -38,29 +40,51 @@ async def test_extra_dim_darkens_video_and_grid(tmp_path, example_config, clock)
     from pikiosk.web.server import state_view
     from tests.conftest import make_controller
 
+    sysfs = tmp_path / "backlight" / "rpi_backlight" / "brightness"
     controller, player, _screen = make_controller(tmp_path, example_config, clock)
     bridge = MqttBridge(example_config, controller, MemoryTransport(), clock, controller.store)
-    await bridge._on_message(Incoming("pikiosk/kids_kiosk/cmd/extra_dim", "70"))
-    assert controller.state.extra_dim == 70
-    assert player.properties["contrast"] == round((extra_dim_gain(70) - 1) * 100)
-    assert screen_payload(controller.state)["extra_dim"] == 70
-    assert state_view(controller.state)["dim"] == round(1 - extra_dim_gain(70), 3)
 
-    await controller.dispatch("set_extra_dim", {"percent": 200})
-    assert controller.state.extra_dim == 90  # clamped
+    async def send(command: str, payload: str) -> None:
+        await bridge._on_message(Incoming(f"pikiosk/kids_kiosk/cmd/{command}", payload))
+
+    await send("brightness", "60")
+    assert int(sysfs.read_text(encoding="utf-8")) == map_brightness(percent_to_ha(60), 255, 1)
+
+    await send("extra_dim", "ON")
+    assert controller.state.extra_dim is True
+    assert int(sysfs.read_text(encoding="utf-8")) == 1  # backlight at its lowest step
+    payload = screen_payload(controller.state)
+    assert payload["extra_dim"] == "ON"
+    assert payload["brightness"] == percent_to_ha(50)  # the slider shows the dim level
+
+    # Now the slider darkens the picture, the backlight stays put.
+    await send("brightness", "1")
+    assert controller.state.dim_level == 1
+    assert controller.state.brightness == percent_to_ha(60)
+    assert int(sysfs.read_text(encoding="utf-8")) == 1
+    gain = picture_gain(controller.state)
+    assert player.properties["contrast"] == round((gain - 1) * 100)
+    assert state_view(controller.state)["dim"] == round(1 - gain, 3)
+    # The light entity's brightness drives the same dimmer.
+    await send("screen", '{"state":"ON","brightness":128}')
+    assert controller.state.dim_level == 50
+    assert int(sysfs.read_text(encoding="utf-8")) == 1
 
     # mpv restarts with default settings; the dim is applied again on connect.
     player.properties.pop("contrast")
     await controller.set_mpv_connected(True)
-    assert player.properties["contrast"] == round((extra_dim_gain(90) - 1) * 100)
+    assert player.properties["contrast"] == round((picture_gain(controller.state) - 1) * 100)
 
     store = StateStore(tmp_path / "state.json")
     store.save(controller.state)
-    assert store.load(KioskState()).extra_dim == 90
+    restored = store.load(KioskState())
+    assert restored.extra_dim is True and restored.dim_level == 50
 
-    await controller.dispatch("set_extra_dim", {"percent": 0})
+    await send("extra_dim", "OFF")
     assert player.properties["contrast"] == 0
     assert state_view(controller.state)["dim"] == 0
+    assert screen_payload(controller.state)["brightness"] == percent_to_ha(60)
+    assert int(sysfs.read_text(encoding="utf-8")) == map_brightness(percent_to_ha(60), 255, 1)
 
 
 def test_discover_only_and_max(tmp_path: Path) -> None:

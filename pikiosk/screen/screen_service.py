@@ -44,6 +44,7 @@ class ScreenService:
         self.sleep_timeout_min = config.screen.sleep_timeout_min
         self.on_power: Callable[[bool], Awaitable[None]] | None = None
         self.transform: str | None = None
+        self.lowest = False  # extra dim: backlight at its lowest step whatever the brightness
 
     async def apply_orientation(self) -> None:
         """Turn the output per config.screen; remembers the transform for re-enables."""
@@ -89,6 +90,9 @@ class ScreenService:
 
     async def _apply(self, on: bool, ha_brightness: int) -> None:
         async with self._lock:
+            floor_percent = self.config.screen.min_brightness
+            if self.lowest:
+                ha_brightness, floor_percent = 1, 0  # maps to sysfs 1
             method = self.config.screen.blank_method
             name = self.output_name or self.config.screen.output_name
             transform = self.transform
@@ -103,17 +107,13 @@ class ScreenService:
                 sysfs = map_brightness(
                     ha_brightness if on else 0,
                     device.max_brightness,
-                    self.config.screen.min_brightness if on else 0,
+                    floor_percent if on else 0,
                 )
                 await asyncio.to_thread(self.backlight.write, sysfs, on)
             elif self.backlight.available and on:
                 device = self.backlight.device
                 assert device is not None
-                sysfs = map_brightness(
-                    ha_brightness,
-                    device.max_brightness,
-                    self.config.screen.min_brightness,
-                )
+                sysfs = map_brightness(ha_brightness, device.max_brightness, floor_percent)
                 await asyncio.to_thread(self.backlight.write, sysfs, True)
 
     def note_activity(self) -> None:

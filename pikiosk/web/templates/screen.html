@@ -5,7 +5,7 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label class="pk-field">Default brightness<input class="pk-input" type="number" name="default_brightness" value="{{ config.screen.default_brightness }}"></label>
   <label class="pk-field">Lowest backlight (%)<input class="pk-input" type="number" min="0" max="100" name="min_brightness" value="{{ config.screen.min_brightness }}"></label>
-  <p class="text-xs text-slate-500">Brightness never goes below this while the screen is on; 1 lets the panel reach its dimmest real setting. For darker still, use <strong>Extra dim</strong> in Home Assistant, which also darkens the picture itself.</p>
+  <p class="text-xs text-slate-500">Brightness never goes below this while the screen is on; 1 lets the panel reach its dimmest real setting. For darker still, turn on <strong>Extra dim</strong> in Home Assistant: the backlight goes to its lowest step and the Brightness slider then darkens the picture itself.</p>
   <label class="pk-field">Sleep timeout (minutes)<input class="pk-input" type="number" name="sleep_timeout_min" value="{{ config.screen.sleep_timeout_min }}"></label>
   <label class="pk-field">Orientation
     <select class="pk-input" name="orientation">

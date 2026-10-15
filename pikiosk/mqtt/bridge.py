@@ -311,7 +311,7 @@ class MqttBridge:
             await self.controller.dispatch("set_brightness", {"percent": int(float(payload))})
             return
         if name == "extra_dim":
-            await self.controller.dispatch("set_extra_dim", {"percent": int(float(payload))})
+            await self.controller.dispatch("set_extra_dim", {"enabled": payload.upper() == "ON"})
             return
         if name == "mute":
             await self.controller.dispatch("set_mute", {"muted": payload == "ON"})

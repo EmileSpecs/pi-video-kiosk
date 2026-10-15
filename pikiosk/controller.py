@@ -20,13 +20,12 @@ from pikiosk.persistence import StateStore
 from pikiosk.player.base import PlayerBackend
 from pikiosk.screen.screen_service import ScreenService
 from pikiosk.state import (
-    MAX_EXTRA_DIM,
     AfterVideo,
     KioskState,
     NowPlaying,
     PlayerState,
-    extra_dim_gain,
     percent_to_ha,
+    picture_gain,
 )
 
 log = logging.getLogger("pikiosk.controller")
@@ -108,6 +107,7 @@ class Controller:
             mpv_connected=player.connected,
         )
         screen.brightness = self.state.brightness
+        screen.lowest = self.state.extra_dim
         screen.screen_on = self.state.screen_on
         screen.sleep_enabled = self.state.sleep_enabled
         screen.sleep_timeout_min = self.state.sleep_timeout_min
@@ -321,7 +321,10 @@ class Controller:
         self._set(replace(self.state, muted=bool(muted)))
 
     async def cmd_screen(self, on: bool, brightness: int | None = None) -> None:
-        if brightness is not None:
+        if brightness is not None and self.state.extra_dim:
+            # The light's brightness is the extra dim slider while that is on.
+            await self._set_dim_level(round(int(brightness) / 255 * 100))
+        elif brightness is not None:
             self._set(replace(self.state, brightness=int(brightness)))
         if on:
             await self.screen.turn_on(self.state.brightness)
@@ -329,6 +332,9 @@ class Controller:
             await self.screen.turn_off()
 
     async def cmd_set_brightness(self, percent: int) -> None:
+        if self.state.extra_dim:
+            await self._set_dim_level(percent)
+            return
         percent = max(1, min(100, int(percent)))
         level = percent_to_ha(percent)
         self._set(replace(self.state, brightness=level))
@@ -337,17 +343,24 @@ class Controller:
         else:
             self.screen.brightness = level
 
-    async def cmd_set_extra_dim(self, percent: int) -> None:
-        percent = max(0, min(MAX_EXTRA_DIM, int(percent)))
-        self._set(replace(self.state, extra_dim=percent))
-        await self._apply_extra_dim()
+    async def cmd_set_extra_dim(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        self._set(replace(self.state, extra_dim=enabled))
+        self.screen.lowest = enabled
+        if self.state.screen_on:
+            await self.screen.set_brightness(self.state.brightness)
+        await self._apply_picture_gain()
 
-    async def _apply_extra_dim(self) -> None:
+    async def _set_dim_level(self, percent: int) -> None:
+        self._set(replace(self.state, dim_level=max(1, min(100, int(percent)))))
+        await self._apply_picture_gain()
+
+    async def _apply_picture_gain(self) -> None:
         """Darken the video below what the backlight can do (the grid follows the state)."""
         if not self.player.connected:
             return  # applied when mpv connects
         # mpv's contrast is a gain on the picture that keeps black at black.
-        contrast = round((extra_dim_gain(self.state.extra_dim) - 1) * 100)
+        contrast = round((picture_gain(self.state) - 1) * 100)
         try:
             await self.player.set_property("contrast", contrast)
         except Exception as exc:
@@ -414,7 +427,7 @@ class Controller:
         if connected:
             await self.player.set_volume(self.state.volume)
             await self.player.set_mute(self.state.muted)
-            await self._apply_extra_dim()
+            await self._apply_picture_gain()
             await self._flush_pending()
 
     async def set_mqtt_connected(self, connected: bool, error: str | None = None) -> None:

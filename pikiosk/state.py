@@ -47,7 +47,10 @@ class KioskState:
     after_video: AfterVideo = AfterVideo.STOP
     screen_on: bool = True
     brightness: int = 178
-    extra_dim: int = 0  # 0..MAX_EXTRA_DIM percent darker than the backlight alone
+    # Extra dim: backlight at its lowest step, and the brightness slider
+    # (dim_level, 1..100 %) darkens the picture below that instead.
+    extra_dim: bool = False
+    dim_level: int = 50
     sleep_enabled: bool = True
     sleep_timeout_min: int = 10
     ui_locked: bool = False
@@ -62,18 +65,27 @@ class KioskState:
     mqtt_error: str | None = None
 
 
-MAX_EXTRA_DIM = 90
+DIMMEST_LIGHT = 0.1  # extra dim at 1 % lets through a tenth of the backlight's lowest light
 
 
 def percent_to_ha(percent: int) -> int:
     return max(0, min(255, round(percent / 100 * 255)))
 
 
-def extra_dim_gain(percent: int) -> float:
-    """Signal multiplier that makes the picture `percent` darker to the eye.
+def picture_gain(state: KioskState) -> float:
+    """Signal multiplier for the picture: 1.0 unless extra dim is on.
 
-    Pixel values are gamma encoded, so light output goes roughly with the
-    value to the power 2.2; scaling values by this gain cuts light by `percent`.
+    At 100 % the picture is untouched (the backlight's lowest step alone); at
+    1 % it gives a tenth of that light. Pixel values are gamma encoded, so
+    light goes roughly with the value to the power 2.2.
     """
-    percent = max(0, min(MAX_EXTRA_DIM, int(percent)))
-    return float((1 - percent / 100) ** (1 / 2.2))
+    if not state.extra_dim:
+        return 1.0
+    level = max(1, min(100, int(state.dim_level)))
+    light = DIMMEST_LIGHT + (1 - DIMMEST_LIGHT) * (level - 1) / 99
+    return float(light ** (1 / 2.2))
+
+
+def shown_brightness(state: KioskState) -> int:
+    """What the brightness slider shows: the dim level while extra dim is on."""
+    return percent_to_ha(state.dim_level) if state.extra_dim else state.brightness

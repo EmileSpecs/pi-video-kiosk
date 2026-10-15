@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pikiosk.state import KioskState, PlayerState
+from pikiosk.state import KioskState, PlayerState, shown_brightness
 
 
 def _iso(moment: datetime) -> str:
@@ -71,9 +71,9 @@ def player_payload(state: KioskState, *, now: datetime | None = None) -> dict[st
 def screen_payload(state: KioskState) -> dict[str, Any]:
     return {
         "state": "ON" if state.screen_on else "OFF",
-        "brightness": state.brightness,
+        "brightness": shown_brightness(state),
         "color_mode": "brightness",
-        "extra_dim": state.extra_dim,
+        "extra_dim": "ON" if state.extra_dim else "OFF",
     }
 
 
