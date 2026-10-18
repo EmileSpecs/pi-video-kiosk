@@ -211,6 +211,22 @@ def build_component_payloads(
         player=False,
     )
     add(
+        "switch",
+        "grayscale",
+        {
+            **_identity(config, "switch", "grayscale", "Grayscale"),
+            "command_topic": topics.command("grayscale"),
+            "state_topic": state,
+            "value_template": "{{ 'ON' if value_json.grayscale else 'OFF' }}",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "state_on": "ON",
+            "state_off": "OFF",
+            "icon": "mdi:invert-colors-off",
+        },
+        player=True,
+    )
+    add(
         "number",
         "sleep_timeout",
         {

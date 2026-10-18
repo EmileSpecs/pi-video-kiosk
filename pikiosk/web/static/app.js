@@ -249,6 +249,7 @@
     }
     setLocked(Boolean(next.ui_locked));
     if (typeof next.dim === "number") dim.style.opacity = String(Math.max(0, Math.min(0.95, next.dim)));
+    document.documentElement.classList.toggle("grayscale", Boolean(next.grayscale));
 
     for (const [name, node] of cards) {
       const selected = next.selected === name;

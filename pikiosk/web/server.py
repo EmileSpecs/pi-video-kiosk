@@ -36,6 +36,7 @@ def state_view(state: KioskState, version: str = "") -> dict[str, Any]:
         "ui_locked": state.ui_locked,
         "screen_on": state.screen_on,
         "dim": round(1 - picture_gain(state), 3),
+        "grayscale": state.grayscale,
         "title": current.title if current else "",
         "volume": state.volume,
         "muted": state.muted,

@@ -313,6 +313,9 @@ class MqttBridge:
         if name == "extra_dim":
             await self.controller.dispatch("set_extra_dim", {"enabled": payload.upper() == "ON"})
             return
+        if name == "grayscale":
+            await self.controller.dispatch("set_grayscale", {"enabled": payload.upper() == "ON"})
+            return
         if name == "mute":
             await self.controller.dispatch("set_mute", {"muted": payload == "ON"})
             return

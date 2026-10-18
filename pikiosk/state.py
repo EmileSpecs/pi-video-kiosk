@@ -51,6 +51,7 @@ class KioskState:
     # (dim_level, 1..100 %) darkens the picture below that instead.
     extra_dim: bool = False
     dim_level: int = 50
+    grayscale: bool = False  # mpv saturation -100; touch grid CSS filter
     sleep_enabled: bool = True
     sleep_timeout_min: int = 10
     ui_locked: bool = False

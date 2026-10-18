@@ -16,6 +16,7 @@ PERSISTED = (
     "brightness",
     "extra_dim",
     "dim_level",
+    "grayscale",
     "screen_on",
     "sleep_enabled",
     "sleep_timeout_min",

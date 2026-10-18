@@ -347,6 +347,12 @@ body {
 .hotspot.bottom_left { bottom: 0; left: 0; }
 .hotspot.bottom_right { bottom: 0; right: 0; }
 
+/* Grayscale: strip colour from the touch grid (video uses mpv saturation) --- */
+
+html.grayscale {
+  filter: grayscale(1);
+}
+
 /* Extra dim: darkens everything below what the backlight can do ------------- */
 
 .dim {

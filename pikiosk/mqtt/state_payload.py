@@ -59,6 +59,7 @@ def player_payload(state: KioskState, *, now: datetime | None = None) -> dict[st
         "download_progress": state.download_progress if state.player == PlayerState.LOADING else None,
         "volume": state.volume,
         "muted": state.muted,
+        "grayscale": state.grayscale,
         "after_video": state.after_video.value,
         "sleep_enabled": state.sleep_enabled,
         "sleep_timeout": state.sleep_timeout_min,

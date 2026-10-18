@@ -366,6 +366,20 @@ class Controller:
         except Exception as exc:
             log.warning("extra dim not applied to mpv error=%s", exc)
 
+    async def cmd_set_grayscale(self, enabled: bool) -> None:
+        self._set(replace(self.state, grayscale=bool(enabled)))
+        await self._apply_grayscale()
+
+    async def _apply_grayscale(self) -> None:
+        """Strip colour from the video; the touch grid follows from the state push."""
+        if not self.player.connected:
+            return
+        # mpv: -100 is fully desaturated (documented grayscale).
+        try:
+            await self.player.set_property("saturation", -100 if self.state.grayscale else 0)
+        except Exception as exc:
+            log.warning("grayscale not applied to mpv error=%s", exc)
+
     async def cmd_set_sleep_enabled(self, enabled: bool) -> None:
         self._set(replace(self.state, sleep_enabled=bool(enabled)))
         self.screen.note_activity()
@@ -428,6 +442,7 @@ class Controller:
             await self.player.set_volume(self.state.volume)
             await self.player.set_mute(self.state.muted)
             await self._apply_picture_gain()
+            await self._apply_grayscale()
             await self._flush_pending()
 
     async def set_mqtt_connected(self, connected: bool, error: str | None = None) -> None:

@@ -24,6 +24,36 @@ def test_on_reaches_the_lowest_backlight_step() -> None:
     assert map_brightness(3, 31, 5) == 2
 
 
+async def test_grayscale_desaturates_video_and_grid(tmp_path, example_config, clock) -> None:
+    from pikiosk.mqtt.bridge import MqttBridge
+    from pikiosk.mqtt.memory import Incoming, MemoryTransport
+    from pikiosk.mqtt.state_payload import player_payload
+    from pikiosk.persistence import StateStore
+    from pikiosk.web.server import state_view
+    from tests.conftest import make_controller
+
+    controller, player, _screen = make_controller(tmp_path, example_config, clock)
+    bridge = MqttBridge(example_config, controller, MemoryTransport(), clock, controller.store)
+    await bridge._on_message(Incoming("pikiosk/kids_kiosk/cmd/grayscale", "ON"))
+    assert controller.state.grayscale is True
+    assert player.properties["saturation"] == -100
+    assert player_payload(controller.state)["grayscale"] is True
+    assert state_view(controller.state)["grayscale"] is True
+
+    player.properties.pop("saturation")
+    await controller.set_mpv_connected(True)
+    assert player.properties["saturation"] == -100
+
+    store = StateStore(tmp_path / "state.json")
+    store.save(controller.state)
+    assert store.load(KioskState()).grayscale is True
+
+    await bridge._on_message(Incoming("pikiosk/kids_kiosk/cmd/grayscale", "OFF"))
+    assert controller.state.grayscale is False
+    assert player.properties["saturation"] == 0
+    assert state_view(controller.state)["grayscale"] is False
+
+
 def test_picture_gain() -> None:
     assert picture_gain(KioskState(extra_dim=False, dim_level=1)) == 1.0
     assert picture_gain(KioskState(extra_dim=True, dim_level=100)) == 1.0  # backlight minimum alone
