@@ -47,6 +47,8 @@ playback:
   audio_device: auto
   network_timeout_s: 30
   after_video_scope: playlist
+  play_limit_enabled: false  # stop and blank the screen after play_limit_min of one session
+  play_limit_min: 30
   upload_directory: ~/.local/share/pi-kiosk/videos
 
 screen:

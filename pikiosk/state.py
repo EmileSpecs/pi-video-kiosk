@@ -52,6 +52,8 @@ class KioskState:
     extra_dim: bool = False
     dim_level: int = 50
     grayscale: bool = False  # mpv saturation -100; touch grid CSS filter
+    play_limit_enabled: bool = False
+    play_limit_min: int = 30
     sleep_enabled: bool = True
     sleep_timeout_min: int = 10
     ui_locked: bool = False

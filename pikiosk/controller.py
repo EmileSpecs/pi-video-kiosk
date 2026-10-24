@@ -95,6 +95,9 @@ class Controller:
         self._managed_queue = False
         self._queued = 0  # playlist items mpv actually holds
         self._stop_requested = False
+        self._play_session_started: float | None = None
+        self._play_limit_timer: object | None = None
+        self._play_limit_for: int | None = None  # minutes the armed timer was scheduled for
         self._title_tasks: set[asyncio.Task[None]] = set()
         self._drain_lock = asyncio.Lock()
         self._drain_task: asyncio.Task[None] | None = None
@@ -130,6 +133,8 @@ class Controller:
             muted=self.config.playback.start_muted,
             after_video=AfterVideo(self.config.playback.after_video),
             brightness=percent_to_ha(self.config.screen.default_brightness),
+            play_limit_enabled=self.config.playback.play_limit_enabled,
+            play_limit_min=self.config.playback.play_limit_min,
             sleep_enabled=self.config.screen.sleep_enabled,
             sleep_timeout_min=self.config.screen.sleep_timeout_min,
             ui_locked=self.config.ui.locked,
@@ -144,6 +149,7 @@ class Controller:
             sleep_enabled=new_state.sleep_enabled,
             sleep_timeout_min=new_state.sleep_timeout_min,
         )
+        self._sync_play_limit()
         for listener in list(self._listeners):
             listener(new_state)
         self.clock.call_later(2, self._persist)
@@ -380,6 +386,61 @@ class Controller:
         except Exception as exc:
             log.warning("grayscale not applied to mpv error=%s", exc)
 
+    async def cmd_set_play_limit(self, enabled: bool) -> None:
+        self._set(replace(self.state, play_limit_enabled=bool(enabled)))
+
+    async def cmd_set_play_limit_min(self, minutes: int) -> None:
+        minutes = max(1, min(240, int(minutes)))
+        self._set(replace(self.state, play_limit_min=minutes))
+
+    def _sync_play_limit(self) -> None:
+        """One countdown per stretch of watching, including pause and the next item."""
+        watching = self.state.player in {PlayerState.PLAYING, PlayerState.PAUSED, PlayerState.LOADING}
+        if not self.state.play_limit_enabled or not watching:
+            self._cancel_play_limit()
+            return
+        if self._play_session_started is None:
+            if self.state.player != PlayerState.PLAYING:
+                return  # the countdown starts when the picture is actually up
+            self._play_session_started = self.clock.monotonic()
+        if self._play_limit_timer is not None and self._play_limit_for == self.state.play_limit_min:
+            return
+        self._schedule_play_limit()
+
+    def _schedule_play_limit(self) -> None:
+        handle = self._play_limit_timer
+        if handle is not None:
+            cancel = getattr(handle, "cancel", None)
+            if cancel:
+                cancel()
+        started = self._play_session_started
+        if started is None:
+            self._play_limit_timer = None
+            self._play_limit_for = None
+            return
+        remaining = self.state.play_limit_min * 60 - (self.clock.monotonic() - started)
+        self._play_limit_for = self.state.play_limit_min
+        self._play_limit_timer = self.clock.call_later(max(0.0, remaining), self._play_limit_expired)
+
+    def _cancel_play_limit(self) -> None:
+        handle = self._play_limit_timer
+        self._play_limit_timer = None
+        self._play_limit_for = None
+        self._play_session_started = None
+        if handle is not None:
+            cancel = getattr(handle, "cancel", None)
+            if cancel:
+                cancel()
+
+    async def _play_limit_expired(self) -> None:
+        if self._play_session_started is None or not self.state.play_limit_enabled:
+            return
+        self._cancel_play_limit()
+        if self.state.player in {PlayerState.PLAYING, PlayerState.PAUSED, PlayerState.LOADING}:
+            await self.cmd_stop()
+        if self.state.screen_on:
+            await self.screen.turn_off()
+
     async def cmd_set_sleep_enabled(self, enabled: bool) -> None:
         self._set(replace(self.state, sleep_enabled=bool(enabled)))
         self.screen.note_activity()
@@ -424,6 +485,18 @@ class Controller:
         self.catalog = catalog
         if self.state.selected and self.state.selected not in catalog.by_name:
             self._set(replace(self.state, selected=None))
+        playback = config.playback
+        if (
+            self.state.play_limit_enabled != playback.play_limit_enabled
+            or self.state.play_limit_min != playback.play_limit_min
+        ):
+            self._set(
+                replace(
+                    self.state,
+                    play_limit_enabled=playback.play_limit_enabled,
+                    play_limit_min=playback.play_limit_min,
+                )
+            )
         # The grid learns about a new catalog from the next state push, so
         # send one even when nothing in KioskState changed.
         for listener in list(self._listeners):

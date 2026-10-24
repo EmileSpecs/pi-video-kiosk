@@ -266,6 +266,8 @@ playback:
   audio_device: auto            # mpv --audio-device value, e.g. "pipewire" or "alsa/plughw:CARD=Device"
   network_timeout_s: 30
   after_video_scope: playlist   # item | playlist (when stop/blank apply inside playlists)
+  play_limit_enabled: false     # stop playback and turn the screen off after one session
+  play_limit_min: 30            # 1-240; countdown starts when playback begins, not on next/pause
 
 screen:
   backlight_device: auto        # auto | name under /sys/class/backlight

@@ -13,6 +13,9 @@
     </select>
   </label>
   <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="allow_unlisted" {% if config.playback.allow_unlisted %}checked{% endif %}> Allow a URL from Home Assistant</label>
+  <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="play_limit_enabled" {% if config.playback.play_limit_enabled %}checked{% endif %}> Limit how long a video session can run</label>
+  <label class="pk-field">Play limit (minutes)<input class="pk-input" type="number" min="1" max="240" name="play_limit_min" value="{{ config.playback.play_limit_min }}"></label>
+  <p class="text-xs text-slate-500">When the limit is on, the countdown starts as playback begins and keeps running through pause, next, and the rest of a playlist. At the end the video stops and the screen turns off. Pressing play again starts a new session. Home Assistant has the same switch and number.</p>
   <button class="pk-button" type="submit">Save</button>
 </form>
 {% endblock %}

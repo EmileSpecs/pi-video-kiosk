@@ -260,6 +260,39 @@ def build_component_payloads(
         player=False,
     )
     add(
+        "switch",
+        "play_limit",
+        {
+            **_identity(config, "switch", "play_limit", "Play limit"),
+            "command_topic": topics.command("play_limit"),
+            "state_topic": state,
+            "value_template": "{{ 'ON' if value_json.play_limit_enabled else 'OFF' }}",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "entity_category": "config",
+            "icon": "mdi:timer-off",
+        },
+        player=False,
+    )
+    add(
+        "number",
+        "play_limit_min",
+        {
+            **_identity(config, "number", "play_limit_min", "Play limit"),
+            "command_topic": topics.command("play_limit_min"),
+            "state_topic": state,
+            "value_template": "{{ value_json.play_limit_min }}",
+            "min": 1,
+            "max": 240,
+            "step": 1,
+            "mode": "box",
+            "unit_of_measurement": "min",
+            "entity_category": "config",
+            "icon": "mdi:timer-outline",
+        },
+        player=False,
+    )
+    add(
         "select",
         "after_video",
         {

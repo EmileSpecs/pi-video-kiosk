@@ -63,6 +63,8 @@ def player_payload(state: KioskState, *, now: datetime | None = None) -> dict[st
         "after_video": state.after_video.value,
         "sleep_enabled": state.sleep_enabled,
         "sleep_timeout": state.sleep_timeout_min,
+        "play_limit_enabled": state.play_limit_enabled,
+        "play_limit_min": state.play_limit_min,
         "ui_enabled": not state.ui_locked,
         "last_error": state.last_error,
         "updated": _iso(moment),

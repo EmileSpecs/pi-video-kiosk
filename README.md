@@ -57,6 +57,8 @@ The Screen page picks the orientation. Landscape is the default: the Touch Displ
 
 Home Assistant's **Grayscale** switch strips colour from the video (mpv saturation −100) and the touch grid (CSS filter). It survives restarts and works with Extra dim.
 
+Home Assistant's **Play limit** switch (also on the Playback page) caps one watching session. The countdown starts when playback begins and keeps going through pause, next, and the rest of a playlist. When it runs out, the video stops and the screen turns off. Turning the screen on and pressing play starts a new session.
+
 For a dark room, turn on Home Assistant's **Extra dim** switch, like a phone's extra-dim mode. The backlight drops to its lowest step and the Brightness slider (and the Screen light's brightness) then darkens the picture itself, from 100 % (the lowest backlight alone) down to 1 % (a tenth of that): mpv lowers the video's contrast gain (black stays black) and the touch grid gets a black overlay. Switching it off gives the slider back to the backlight at the brightness it had before. Both settings survive restarts. The Screen page's "Lowest backlight" (default 1 %) is the floor for Brightness.
 
 Home Assistant is the remote control: play, pause, stop, next, previous, volume, mute, screen, sleep, and the touch-UI lock. Next and previous move inside the playing playlist first (previous restarts the video when more than five seconds in) and only step through the catalog at its ends. Discovery creates those entities. `ha/packages/pikiosk.yaml` adds a universal media player and example automations. `ha/dashboards/pikiosk-card.yaml` is a Lovelace starting point. If `device.id` is not `kids_kiosk`, replace that id in both files.

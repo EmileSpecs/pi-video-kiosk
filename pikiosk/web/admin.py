@@ -643,6 +643,8 @@ async def playback_post(request: web.Request) -> web.Response:
                 "default_volume": int(str(data.get("default_volume"))),
                 "after_video": str(data.get("after_video") or "stop"),
                 "allow_unlisted": data.get("allow_unlisted") == "on",
+                "play_limit_enabled": data.get("play_limit_enabled") == "on",
+                "play_limit_min": int(str(data.get("play_limit_min") or store.config.playback.play_limit_min)),
             }
         )
         config = store.config.model_copy(update={"playback": playback})

@@ -139,6 +139,9 @@ class PlaybackConfig(BaseModel):
     audio_device: str = "auto"
     network_timeout_s: int = 30
     after_video_scope: Literal["item", "playlist"] = "playlist"
+    # One stretch of watching. Off by default; Home Assistant can turn it on.
+    play_limit_enabled: bool = False
+    play_limit_min: int = 30
     file_roots: list[str] = Field(default_factory=lambda: ["/home/kiosk/Videos"])
     # Videos uploaded through the admin site land here; always a file root.
     upload_directory: str = "~/.local/share/pi-kiosk/videos"
@@ -155,6 +158,13 @@ class PlaybackConfig(BaseModel):
     def _timeout(cls, value: int) -> int:
         if not 30 <= value <= 3600:
             raise ValueError("download_timeout_s must be 30-3600")
+        return value
+
+    @field_validator("play_limit_min")
+    @classmethod
+    def _play_limit(cls, value: int) -> int:
+        if not 1 <= value <= 240:
+            raise ValueError("play_limit_min must be 1-240")
         return value
 
     @model_validator(mode="after")

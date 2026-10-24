@@ -334,6 +334,12 @@ class MqttBridge:
         if name == "sleep_enabled":
             await self.controller.dispatch("set_sleep_enabled", {"enabled": payload == "ON"})
             return
+        if name == "play_limit":
+            await self.controller.dispatch("set_play_limit", {"enabled": payload.upper() == "ON"})
+            return
+        if name == "play_limit_min":
+            await self.controller.dispatch("set_play_limit_min", {"minutes": int(float(payload))})
+            return
         if name == "after_video":
             await self.controller.dispatch("set_after_video", {"mode": payload})
             return

@@ -17,6 +17,8 @@ PERSISTED = (
     "extra_dim",
     "dim_level",
     "grayscale",
+    "play_limit_enabled",
+    "play_limit_min",
     "screen_on",
     "sleep_enabled",
     "sleep_timeout_min",
@@ -72,6 +74,8 @@ class StateStore:
                 value = AfterVideo(str(value))
             elif key == "extra_dim":
                 value = bool(value)  # briefly stored as a percentage
+            elif key == "play_limit_enabled":
+                value = bool(value)
             elif key == "player":
                 try:
                     value = PlayerState(str(value))

@@ -174,3 +174,69 @@ async def test_wake_touch_is_swallowed(tmp_path, example_config, clock) -> None:
     assert touch.grabbed is True
     await clock.advance(0.3)
     assert touch.grabbed is False
+
+
+async def test_play_limit_ends_the_session_and_blanks_the_screen(tmp_path, example_config, clock) -> None:
+    from pikiosk.mqtt.bridge import MqttBridge
+    from pikiosk.mqtt.memory import Incoming, MemoryTransport
+    from pikiosk.persistence import StateStore
+    from tests.conftest import make_controller
+
+    controller, _player, _screen = make_controller(tmp_path, example_config, clock)
+    bridge = MqttBridge(example_config, controller, MemoryTransport(), clock, controller.store)
+    power = tmp_path / "backlight" / "rpi_backlight" / "bl_power"
+
+    async def send(command: str, payload: str) -> None:
+        await bridge._on_message(Incoming(f"pikiosk/kids_kiosk/cmd/{command}", payload))
+
+    await send("play_limit_min", "30")
+    await send("play_limit", "ON")
+    assert controller.state.play_limit_enabled is True
+    assert controller.state.play_limit_min == 30
+
+    await controller.dispatch("select", {"name": "Baby Shark"})
+    assert controller.state.player == PlayerState.PLAYING
+    started = controller._play_session_started
+    assert started is not None
+
+    await controller.dispatch("pause", {})
+    await controller.dispatch("play", {})
+    await controller.dispatch("next", {})
+    assert controller.state.player == PlayerState.PLAYING
+    assert controller._play_session_started == started  # pause, resume and next are one session
+
+    await clock.advance(90)
+    await send("play_limit_min", "1")  # already used up; fires from the original start
+    await clock.advance(0)
+    assert controller.state.player == PlayerState.IDLE
+    assert controller.state.now is None
+    assert controller.state.screen_on is False
+    assert power.read_text(encoding="utf-8") == "4"
+
+    await send("screen", '{"state":"ON"}')
+    await controller.dispatch("select", {"name": "Baby Shark"})
+    assert controller.state.player == PlayerState.PLAYING
+    assert controller.state.screen_on is True
+    assert controller._play_session_started != started
+    fresh = controller._play_session_started
+
+    await clock.advance(59)
+    assert controller.state.player == PlayerState.PLAYING
+    await clock.advance(1)
+    assert controller.state.player == PlayerState.IDLE
+    assert controller.state.screen_on is False
+
+    await send("screen", '{"state":"ON"}')
+    await controller.dispatch("select", {"name": "Baby Shark"})
+    assert controller._play_session_started not in {None, fresh}
+    await send("play_limit", "OFF")
+    assert controller._play_session_started is None
+    await clock.advance(120)
+    assert controller.state.player == PlayerState.PLAYING
+    assert controller.state.screen_on is True
+
+    store = StateStore(tmp_path / "saved.json")
+    store.save(controller.state)
+    restored = store.load(KioskState())
+    assert restored.play_limit_enabled is False
+    assert restored.play_limit_min == 1
