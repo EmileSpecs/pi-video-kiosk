@@ -34,7 +34,7 @@
 <section class="pk-card mt-6 space-y-3">
   <h2 class="text-lg font-semibold">Device</h2>
   <dl class="grid grid-cols-2 gap-3 text-sm">
-    <div><dt class="text-slate-500">Version</dt><dd class="font-medium">{{ info.version }}{% if info.commit %} <span class="font-mono text-slate-500">{{ info.commit }}</span>{% endif %}</dd></div>
+    <div><dt class="text-slate-500">Version</dt><dd class="font-medium"><span data-field="version">{{ info.version }}</span>{% if info.commit %} <span class="font-mono text-slate-500" data-field="commit">{{ info.commit }}</span>{% endif %}</dd></div>
     <div><dt class="text-slate-500">yt-dlp</dt><dd class="font-medium" data-field="ytdlp_version">{{ info.ytdlp_version or "—" }}</dd></div>
     <div><dt class="text-slate-500">Audio output</dt><dd class="font-medium" data-field="audio_sink">{{ info.audio_sink or "none detected" }}</dd></div>
     <div><dt class="text-slate-500">Cache</dt><dd class="font-medium" data-field="cache">{% if info.cache_used_gb is not none %}{{ info.cache_used_gb }} GB, {{ info.cache_items or 0 }} videos{% else %}—{% endif %}</dd></div>
@@ -84,6 +84,8 @@
       field("volume").textContent = s.volume;
       field("muted").hidden = !s.muted;
       const info = s.info || {};
+      if (field("version")) field("version").textContent = info.version || "—";
+      if (field("commit")) field("commit").textContent = info.commit || "";
       field("ytdlp_version").textContent = info.ytdlp_version || "—";
       field("audio_sink").textContent = info.audio_sink || "none detected";
       field("cache").textContent = info.cache_used_gb !== null && info.cache_used_gb !== undefined

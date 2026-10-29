@@ -1,7 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
-<form method="post" action="/updates" class="pk-card space-y-4">
+<section class="pk-card space-y-3">
   <h1 class="text-2xl font-semibold">Updates</h1>
+  <dl class="grid grid-cols-2 gap-3 text-sm">
+    <div>
+      <dt class="text-slate-500">Running version</dt>
+      <dd class="font-medium">{{ info.version }}{% if info.commit %} <span class="font-mono text-slate-500">{{ info.commit }}</span>{% endif %}</dd>
+    </div>
+    <div>
+      <dt class="text-slate-500">Last update check</dt>
+      <dd class="font-medium">
+        {% if last_update %}
+          {{ last_update.status }}{% if last_update.version %} → {{ last_update.version }}{% endif %}{% if last_update.sha %} <span class="font-mono text-slate-500">{{ last_update.sha }}</span>{% endif %}
+          {% if last_update.at %}<span class="block text-xs font-normal text-slate-500">{{ last_update.at }}</span>{% endif %}
+          {% if last_update.detail %}<span class="block text-xs font-normal text-slate-500">{{ last_update.detail }}</span>{% endif %}
+        {% else %}
+          —
+        {% endif %}
+      </dd>
+    </div>
+  </dl>
+  <p class="text-sm text-slate-500">After Update now, wait about half a minute, then refresh Status. The version number there is what is running.</p>
+</section>
+<form method="post" action="/updates" class="pk-card mt-6 space-y-4">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="auto" {% if config.update.auto %}checked{% endif %}> Update when the git branch changes</label>
   <label class="pk-field">Branch<input class="pk-input" name="ref" value="{{ config.update.ref }}"></label>

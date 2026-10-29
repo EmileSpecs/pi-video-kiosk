@@ -690,10 +690,15 @@ async def screen_post(request: web.Request) -> web.Response:
     raise _done("/screen")
 
 
+def _update_page_extras(request: web.Request) -> dict[str, Any]:
+    info: dict[str, Any] = request.app["info"]()
+    return {"info": info, "last_update": info.get("last_update")}
+
+
 async def updates_page(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
-    return _render(request, "updates.html", session)
+    return _render(request, "updates.html", session, **_update_page_extras(request))
 
 
 async def updates_post(request: web.Request) -> web.Response:
@@ -713,10 +718,13 @@ async def updates_post(request: web.Request) -> web.Response:
     config = store.config.model_copy(update={"update": update})
     error = await _save(request, config, dict(store.secrets))
     if error:
-        return _render(request, "updates.html", session, error=error)
+        return _render(request, "updates.html", session, error=error, **_update_page_extras(request))
     if data.get("action") == "now":
         await controller.cmd_update_app()
-        raise _done("/updates", "Update started.")
+        raise _done(
+            "/updates",
+            "Update started. Wait about 30 seconds, then check Status for the new version.",
+        )
     raise _done("/updates")
 
 

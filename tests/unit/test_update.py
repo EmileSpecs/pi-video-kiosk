@@ -3,7 +3,15 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from pikiosk.updater import RealGit, UpdateError, run_update
+from pikiosk import __version__
+from pikiosk.updater import (
+    RealGit,
+    UpdateError,
+    last_update_path,
+    read_last_update,
+    run_update,
+    write_last_update,
+)
 
 
 class FakeGit:
@@ -127,6 +135,20 @@ def test_pull_failure() -> None:
     git.remote = "ccc"
     result = run_update(git, ref="main", player_state="idle", only_when_idle=False, install=lambda: None)
     assert result.status == "failed"
+
+
+def test_last_update_round_trip(tmp_path: Path) -> None:
+    state = tmp_path / "state.json"
+    path = last_update_path(state)
+    assert path == tmp_path / "last_update.json"
+    assert read_last_update(path) is None
+    write_last_update("updated", path=path, sha="abcdef123456", detail=None)
+    got = read_last_update(path)
+    assert got is not None
+    assert got["status"] == "updated"
+    assert got["sha"] == "abcdef123"
+    assert got["version"] == __version__
+    assert got["at"]
 
 
 def _git(cwd: Path, *args: str) -> None:

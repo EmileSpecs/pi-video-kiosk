@@ -57,7 +57,8 @@ def test_device_mode_cmps(example_config) -> None:
 
 
 def test_golden_snapshots(example_config) -> None:
-    payloads = build_component_payloads(example_config, DiscoveryContext())
+    # Pin sw_version so bumping __version__ does not churn every golden file.
+    payloads = build_component_payloads(example_config, DiscoveryContext(sw_version="1.0.0"))
     assert GOLDEN.is_dir()
     for topic, payload in payloads.items():
         object_id = topic.rstrip("/").split("/")[-2]

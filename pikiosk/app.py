@@ -31,6 +31,7 @@ from pikiosk.screen.backlight import Backlight, discover_backlight
 from pikiosk.screen.output import RecordingOutput, WlrRandr
 from pikiosk.screen.screen_service import ScreenService
 from pikiosk.telemetry import cache_usage, collect
+from pikiosk.updater import last_update_path, read_last_update
 from pikiosk.watchdog import Notifier
 from pikiosk.web.admin import create_admin_app
 from pikiosk.web.server import create_child_app
@@ -116,6 +117,8 @@ class App:
             on_restart=self._restart,
             on_reload=self._reload_hook,
             on_sync=self._sync_now,
+            on_update_app=None if simulate else self._update_app,
+            on_update_ytdlp=None if simulate else self._update_ytdlp,
             ytdlp=self.ytdlp,
         )
         self._precache_task: asyncio.Task[None] | None = None
@@ -140,11 +143,32 @@ class App:
             "cache_items": telemetry.get("cache_items"),
             "ytdlp_version": self._ytdlp_version,
             "mpv_log": self.controller.mpv_log_tail() or tail(MPV_LOG, 10),
+            "last_update": read_last_update(last_update_path(self.store.path)),
         }
 
     async def _restart(self) -> None:
         log.info("restart requested")
         self.stop()
+
+    async def _start_user_unit(self, unit: str) -> None:
+        """Kick a oneshot user unit without waiting (it may restart us)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "--user", "start", "--no-block", unit
+            )
+            await asyncio.wait_for(proc.wait(), 10)
+            if proc.returncode not in (0, None):
+                log.warning("systemctl start %s exited code=%s", unit, proc.returncode)
+        except (OSError, asyncio.TimeoutError) as exc:
+            log.warning("systemctl start %s failed error=%s", unit, exc)
+
+    async def _update_app(self) -> None:
+        log.info("app update requested")
+        await self._start_user_unit("pikiosk-update.service")
+
+    async def _update_ytdlp(self) -> None:
+        log.info("yt-dlp update requested")
+        await self._start_user_unit("pikiosk-ytdlp-update.service")
 
     async def _restart_mpv(self) -> None:
         """mpv stopped answering: let systemd give us a fresh one."""

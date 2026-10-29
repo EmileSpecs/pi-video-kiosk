@@ -3,5 +3,7 @@ Description=Update Pi Video Kiosk from its git branch
 
 [Service]
 Type=oneshot
-ExecStart=/opt/pi-kiosk/bin/pikiosk-update.sh --from-timer
+# Manual / HA "Update now": always fetch. The timer uses pikiosk-update-auto.service
+# which passes --from-timer so it can no-op when auto update is off.
+ExecStart=/opt/pi-kiosk/bin/pikiosk-update.sh
 SyslogIdentifier=pikiosk-update

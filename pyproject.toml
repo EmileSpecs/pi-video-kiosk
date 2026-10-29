@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pikiosk"
-version = "1.0.0"
+version = "1.1.0"
 description = "Locked-down YouTube video kiosk for Raspberry Pi, controlled from Home Assistant."
 readme = "README.md"
 requires-python = ">=3.10"

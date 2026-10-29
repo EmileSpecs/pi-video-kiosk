@@ -31,15 +31,17 @@ sudo ./install.sh --dev --force
 
 ## Update
 
-Manual update, same script the timer runs:
+Each release bumps the package version (`pikiosk/__init__.py` and `pyproject.toml`). The admin **Status** page shows the running version (and short git commit); after an update that number should change. The **Updates** page shows the same version and the result of the last update check.
+
+Manual update:
 
 ```bash
 ssh kiosk@kiosk.local 'sudo -u kiosk /opt/pi-kiosk/bin/pikiosk-update.sh'
 ```
 
-Automatic update is on by default. Every 15 minutes `pikiosk-update.timer` fetches `update.ref` (usually `main`). It fast-forwards only. If a video is playing or loading, it waits for the next tick. After the pull it reinstalls `requirements.lock`, restarts `pikioskd`, and checks `/healthz`. A failed check resets the checkout to the previous commit. `/etc/pi-kiosk` is never touched, so a code update does not change the approved videos.
+Automatic update is on by default. Every 15 minutes `pikiosk-update.timer` runs a check that respects the auto-update setting. It fast-forwards only. If a video is playing or loading, it waits for the next tick. After the pull it reinstalls `requirements.lock`, restarts `pikioskd`, and checks `/healthz`. A failed check resets the checkout to the previous commit. `/etc/pi-kiosk` is never touched, so a code update does not change the approved videos.
 
-The same action is the Home Assistant button **Update app** and the admin Updates page. yt-dlp has its own daily timer.
+**Update now** on the admin Updates page (and the Home Assistant **Update app** button) starts the same script without the timer’s auto-off guard. The page may disconnect briefly while `pikioskd` restarts; refresh Status and confirm the version. yt-dlp has its own daily timer.
 
 ## How a video plays
 

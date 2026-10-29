@@ -1,0 +1,7 @@
+[Unit]
+Description=Check the Pi Video Kiosk git branch for updates (respects auto setting)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pi-kiosk/bin/pikiosk-update.sh --from-timer
+SyslogIdentifier=pikiosk-update

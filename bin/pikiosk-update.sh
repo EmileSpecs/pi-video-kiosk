@@ -9,6 +9,24 @@ if [ "${1:-}" = "--from-timer" ]; then
   FROM_TIMER=1
 fi
 
+record_result() {
+  status=$1
+  sha=${2:-}
+  detail=${3:-}
+  "$ROOT/venv/bin/python" - "$STATE" "$status" "$sha" "$detail" <<'PY' || true
+import sys
+from pathlib import Path
+from pikiosk.updater import last_update_path, write_last_update
+state = Path(sys.argv[1])
+write_last_update(
+    sys.argv[2],
+    path=last_update_path(state),
+    sha=sys.argv[3] or None,
+    detail=sys.argv[4] or None,
+)
+PY
+}
+
 cd "$ROOT"
 if [ -x "$ROOT/bin/pikiosk-fix-perms" ]; then
   sudo -n "$ROOT/bin/pikiosk-fix-perms" "$(id -un)" || echo "could not repair /etc/pi-kiosk permissions" >&2
@@ -52,6 +70,7 @@ if [ "$FROM_TIMER" = "1" ] && [ "$auto" != "1" ]; then
 fi
 if [ "$only_idle" = "1" ] && { [ "$player" = "playing" ] || [ "$player" = "loading" ]; }; then
   echo "skipped: player is $player"
+  record_result skipped_busy "" "player is $player"
   exit 0
 fi
 
@@ -60,6 +79,7 @@ git fetch --prune origin
 remote=$(git rev-parse "origin/$ref")
 if [ "$remote" = "$before" ]; then
   echo "up to date $before"
+  record_result up_to_date "$before"
   exit 0
 fi
 
@@ -73,25 +93,28 @@ drop_editable_hook() {
 }
 
 rollback() {
+  reason=${1:-update failed}
   echo "update failed; restoring $before" >&2
   git reset --hard "$before"
   drop_editable_hook
   "$ROOT/venv/bin/pip" install -r "$ROOT/requirements.lock"
   "$ROOT/venv/bin/pip" install "$ROOT"
   systemctl --user restart pikioskd.service || true
+  record_result rolled_back "$before" "$reason"
 }
 
 if ! git pull --ff-only origin "$ref"; then
   echo "fast-forward failed" >&2
+  record_result failed "$before" "fast-forward failed"
   exit 1
 fi
 drop_editable_hook
 if ! "$ROOT/venv/bin/pip" install -r "$ROOT/requirements.lock"; then
-  rollback
+  rollback "pip install requirements failed"
   exit 1
 fi
 if ! "$ROOT/venv/bin/pip" install "$ROOT"; then
-  rollback
+  rollback "pip install package failed"
   exit 1
 fi
 
@@ -106,7 +129,8 @@ if [ -d "$unit_src" ]; then
       changed=1
     fi
   done
-  for unit in pikioskd.service pikiosk-ytdlp-update.service pikiosk-ytdlp-update.timer pikiosk-update.service pikiosk-update.timer; do
+  for unit in pikioskd.service pikiosk-ytdlp-update.service pikiosk-ytdlp-update.timer \
+              pikiosk-update.service pikiosk-update-auto.service pikiosk-update.timer; do
     if [ -f "$unit_src/$unit" ]; then
       cp "$unit_src/$unit" "$unit_dst/$unit"
     fi
@@ -126,8 +150,10 @@ if [ "$admin_on" = "1" ]; then
 else
   url="http://127.0.0.1:${ui_port}/healthz"
 fi
+after=$(git rev-parse HEAD)
 if ! "$ROOT/bin/wait-for-http" "$url" 30; then
-  rollback
+  rollback "health check failed"
   exit 1
 fi
-echo "updated $(git rev-parse HEAD)"
+record_result updated "$after"
+echo "updated $after"

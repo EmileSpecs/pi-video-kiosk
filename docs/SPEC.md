@@ -1268,6 +1268,27 @@ WantedBy=timers.target
 ```
 (The `pip install` in the venv needs write access, so `/opt/pi-kiosk/venv` is owned by `kiosk`.)
 
+`pikiosk-update.service` / `pikiosk-update-auto.service` / `.timer`
+```ini
+# pikiosk-update.service — admin / HA "Update now" (always runs the script)
+[Service]
+Type=oneshot
+ExecStart=/opt/pi-kiosk/bin/pikiosk-update.sh
+
+# pikiosk-update-auto.service — timer only; no-ops when update.auto is off
+[Service]
+Type=oneshot
+ExecStart=/opt/pi-kiosk/bin/pikiosk-update.sh --from-timer
+
+# .timer
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=pikiosk-update-auto.service
+```
+The script writes `~/.local/state/pi-kiosk/last_update.json` (`status`, `version`, `sha`, `at`). The admin Status page shows the running `__version__` (bumped each release) and short commit; Updates shows the last result.
+
 ### 13.4 mpv config (`system/mpv/mpv.conf`)
 ```ini
 # Locked-down kiosk playback

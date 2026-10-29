@@ -5,6 +5,7 @@ Description=Check the Pi Video Kiosk git branch for updates
 OnBootSec=5min
 OnUnitActiveSec=15min
 Persistent=true
+Unit=pikiosk-update-auto.service
 
 [Install]
 WantedBy=timers.target

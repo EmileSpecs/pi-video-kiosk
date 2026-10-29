@@ -115,6 +115,8 @@ async def test_status_page_without_info_callback(tmp_path: Path, clock: FakeCloc
     try:
         await _login(client)
         html = await (await client.get("/status")).text()
-        assert "Version" in html and "1.0.0" in html
+        from pikiosk import __version__
+
+        assert "Version" in html and __version__ in html
     finally:
         await client.close()
