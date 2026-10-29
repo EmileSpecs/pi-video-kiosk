@@ -68,7 +68,7 @@ class KioskState:
     mqtt_error: str | None = None
 
 
-DIMMEST_LIGHT = 0.1  # extra dim at 1 % lets through a tenth of the backlight's lowest light
+DIMMEST_LIGHT = 0.02  # extra dim at 1 %: about 2 % of the backlight's lowest light
 
 
 def percent_to_ha(percent: int) -> int:

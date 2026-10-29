@@ -923,6 +923,12 @@ class Controller:
             if current and current.video_id and self.cache is not None:
                 self.cache.mark_played(current.video_id)
             self.bus.publish(Event("video_started", {"title": current.title if current else ""}))
+            # Belt and braces: if labwc or a Wayland race left us windowed,
+            # ask for fullscreen again once the file is actually up.
+            try:
+                await self.player.set_property("fullscreen", True)
+            except Exception as exc:
+                log.debug("fullscreen reassert failed error=%s", exc)
             return
         if name == "end-file":
             await self._on_end(str(event.get("reason") or ""), str(event.get("file_error") or ""))

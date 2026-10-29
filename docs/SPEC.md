@@ -975,7 +975,7 @@ Implementation notes for the HA YAML:
 
 ### 9.2 Mapping
 - HA brightness `b ∈ 1..255` maps to sysfs `max(round(b/255*max), ceil(min_brightness% * max), 1)`. The reverse uses `actual_brightness` when available, otherwise the last written value.
-- **Extra dim** (`switch.<id>_extra_dim`, persisted, published as `extra_dim: ON|OFF` in the screen state) goes below the backlight's lowest step. While on, the backlight is held at sysfs 1 and the brightness number and the light's brightness set `dim_level` (1–100 %, persisted separately from the normal brightness) instead. The picture is darkened by mpv `contrast` gain (black stays black) and a black overlay on the touch grid, with light fraction `0.1 + 0.9·(level−1)/99` and gain `light^(1/2.2)`; the screen state's `brightness` reports the dim level. Off restores the normal brightness and an untouched picture.
+- **Extra dim** (`switch.<id>_extra_dim`, persisted, published as `extra_dim: ON|OFF` in the screen state) goes below the backlight's lowest step. While on, the backlight is held at sysfs 1 and the brightness number and the light's brightness set `dim_level` (1–100 %, persisted separately from the normal brightness) instead. The picture is darkened by mpv `contrast` gain (black stays black) and a black overlay on the touch grid, with light fraction `0.02 + 0.98·(level−1)/99` and gain `light^(1/2.2)` (at 1 % about 2 % of the lowest backlight light); the screen state's `brightness` reports the dim level. Off restores the normal brightness and an untouched picture.
 - **Grayscale** (`switch.<id>_grayscale`, persisted, published as `grayscale` in the player state) sets mpv `saturation` to −100 (documented grayscale) while on and 0 while off, and applies a CSS `filter: grayscale(1)` on the touch grid. Re-applied when mpv reconnects.
 - **ON:** write `bl_power=0`, then `brightness=<mapped>`. With `blank_method` set to `output` or `both`, also run `wlr-randr --output <name> --on` (plus the transform if needed) **first**.
 - **OFF:** write `bl_power=4` (and optionally `brightness=0`). With `output` or `both`, also run `wlr-randr --output <name> --off`.
@@ -1305,20 +1305,19 @@ msg-level=all=info
 ### 13.5 labwc `rc.xml` fragment
 ```xml
 <windowRules>
+  <!-- No ToggleFullscreen: mpv already uses fullscreen=yes and Chromium --kiosk.
+       Toggling undoes that and leaves a tiny window (labwc#2774). -->
   <windowRule identifier="mpv" serverDecoration="no">
-    <action name="ToggleFullscreen"/>
     <action name="ToggleAlwaysOnTop"/>
     <action name="Focus"/>
   </windowRule>
-  <windowRule identifier="chromium*" serverDecoration="no">
-    <action name="ToggleFullscreen"/>
-  </windowRule>
+  <windowRule identifier="chromium*" serverDecoration="no"/>
 </windowRules>
 <touch deviceName="" mapToOutput="DSI-1"/>   <!-- installer fills real values -->
 <keyboard><!-- remove default keybinds that could open menus/terminals --></keyboard>
 <mouse><!-- no root-menu on desktop click --></mouse>
 ```
-Important: check the exact window-rule syntax (`identifier` matches `app_id`; for actions on map, the attribute names and whether `ToggleFullscreen` vs mpv's own `fullscreen=yes` is enough) against the labwc version shipped. mpv's `fullscreen=yes` alone may be enough, and the rule then only needs always-on-top. The installer must also strip the default labwc root menu and the keybindings (for example `A-F4`, `W-…`) so that if a keyboard is ever plugged in it can't reach a terminal.
+Important: check the exact window-rule syntax (`identifier` matches `app_id`) against the labwc version shipped. `pikioskd` also reasserts `fullscreen=yes` on every `file-loaded`. The installer must also strip the default labwc root menu and the keybindings (for example `A-F4`, `W-…`) so that if a keyboard is ever plugged in it can't reach a terminal.
 
 ---
 

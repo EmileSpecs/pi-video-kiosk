@@ -1,13 +1,16 @@
 <!-- pikiosk-start -->
+<!--
+  Do not ToggleFullscreen here. mpv already starts with fullscreen=yes and
+  Chromium with --kiosk; ToggleFullscreen undoes that and leaves a small
+  windowed surface (labwc#2774). Always-on-top is still toggled on for mpv
+  because it does not request that itself.
+-->
 <windowRules>
   <windowRule identifier="mpv" serverDecoration="no">
-    <action name="ToggleFullscreen"/>
     <action name="ToggleAlwaysOnTop"/>
     <action name="Focus"/>
   </windowRule>
-  <windowRule identifier="chromium*" serverDecoration="no">
-    <action name="ToggleFullscreen"/>
-  </windowRule>
+  <windowRule identifier="chromium*" serverDecoration="no"/>
 </windowRules>
 <touch mapToOutput="DSI-1"/>
 <keyboard>

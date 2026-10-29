@@ -57,7 +57,7 @@ async def test_grayscale_desaturates_video_and_grid(tmp_path, example_config, cl
 def test_picture_gain() -> None:
     assert picture_gain(KioskState(extra_dim=False, dim_level=1)) == 1.0
     assert picture_gain(KioskState(extra_dim=True, dim_level=100)) == 1.0  # backlight minimum alone
-    assert picture_gain(KioskState(extra_dim=True, dim_level=1)) ** 2.2 == pytest.approx(0.1)
+    assert picture_gain(KioskState(extra_dim=True, dim_level=1)) ** 2.2 == pytest.approx(0.02)
     dimmest = picture_gain(KioskState(extra_dim=True, dim_level=1))
     assert picture_gain(KioskState(extra_dim=True, dim_level=-5)) == dimmest
 
