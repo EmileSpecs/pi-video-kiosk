@@ -1326,13 +1326,14 @@ msg-level=all=info
 ### 13.5 labwc `rc.xml` fragment
 ```xml
 <windowRules>
-  <!-- No ToggleFullscreen: mpv already uses fullscreen=yes and Chromium --kiosk.
-       Toggling undoes that and leaves a tiny window (labwc#2774). -->
+  <!-- No ToggleFullscreen: mpv already uses fullscreen=yes and Chromium kiosk.
+       Toggling undoes that and leaves a tiny window (labwc issue 2774). -->
   <windowRule identifier="mpv" serverDecoration="no">
-    <action name="ToggleAlwaysOnTop"/>
     <action name="Focus"/>
+    <action name="ToggleAlwaysOnTop"/>
   </windowRule>
-  <windowRule identifier="chromium*" serverDecoration="no"/>
+  <windowRule identifier="chromium*" serverDecoration="no">
+  </windowRule>
 </windowRules>
 <touch deviceName="" mapToOutput="DSI-1"/>   <!-- installer fills real values -->
 <keyboard><!-- remove default keybinds that could open menus/terminals --></keyboard>
