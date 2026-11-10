@@ -38,7 +38,7 @@ def test_volume_max(example_config) -> None:
     volume = build_component_payloads(example_config)[
         Topics(example_config).discovery_topic("number", "volume")
     ]
-    assert volume["max"] == 80
+    assert volume["max"] == 100
 
 
 def test_legacy_object_id(example_config) -> None:

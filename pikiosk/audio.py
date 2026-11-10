@@ -97,10 +97,10 @@ def set_default_sink(name: str) -> bool:
     return True
 
 
-def unmute_sink(name: str, volume_percent: int = 80) -> None:
-    """Make sure the sink itself is not muted at 0 % under mpv's volume."""
+def unmute_sink(name: str, volume_percent: int = 100) -> None:
+    """Make sure the sink itself is not muted or soft under mpv's volume."""
     _run("pactl", "set-sink-mute", name, "0")
-    # Soft volume on the sink; mpv still applies its own percentage on top.
+    # Keep the PipeWire sink at full so mpv's 0-100 % is the only attenuator.
     level = max(0, min(100, volume_percent))
     _run("pactl", "set-sink-volume", name, f"{level}%")
 

@@ -255,7 +255,7 @@ mqtt:
 playback:
   ytdl_format: "bestvideo[height<=?720][vcodec^=avc1][fps<=?30]+bestaudio[acodec^=mp4a]/bestvideo[height<=?720][fps<=?30]+bestaudio/best[height<=?720]/best"
   default_volume: 40            # 0-100
-  max_volume: 80                # hard cap, enforced for every source (child safety / hearing)
+  max_volume: 100               # hard cap, enforced for every source (0-100)
   start_muted: false
   after_video: stop             # loop | next | stop | blank
   resume_on_boot: false         # true = resume the last item at its last position after reboot
@@ -627,7 +627,7 @@ Note: HA marks the select state invalid if `selected` is not in `options`. Publi
 {"name":"Volume","unique_id":"pikiosk_kids_kiosk_volume","default_entity_id":"number.kids_kiosk_volume",
  "command_topic":"pikiosk/kids_kiosk/cmd/volume",
  "state_topic":"pikiosk/kids_kiosk/state","value_template":"{{ value_json.volume }}",
- "min":0,"max":80,"step":1,"mode":"slider","unit_of_measurement":"%","icon":"mdi:volume-high"}
+ "min":0,"max":100,"step":1,"mode":"slider","unit_of_measurement":"%","icon":"mdi:volume-high"}
 ```
 (`max` = `playback.max_volume`.)
 
@@ -851,7 +851,7 @@ media_player:
         action: number.set_value
         target: { entity_id: number.kids_kiosk_volume }
         data:
-          value: "{{ [states('number.kids_kiosk_volume') | int(0) + 5, state_attr('number.kids_kiosk_volume','max') | int(80)] | min }}"
+          value: "{{ [states('number.kids_kiosk_volume') | int(0) + 5, state_attr('number.kids_kiosk_volume','max') | int(100)] | min }}"
       volume_down:
         action: number.set_value
         target: { entity_id: number.kids_kiosk_volume }
@@ -884,7 +884,7 @@ script:
         selector: { text: {} }
       volume:
         description: "Optional volume 0-100"
-        selector: { number: { min: 0, max: 80 } }
+        selector: { number: { min: 0, max: 100 } }
     sequence:
       - action: light.turn_on
         target: { entity_id: light.kids_kiosk_screen }
@@ -1474,7 +1474,7 @@ The architecture should make these simple to add (each as a new module, plus com
 9. **On-device parent unlock (PIN)** wanted, or HA-only lock? → **HA only.**
 10. **Offline mode:** wanted from day one? Storage (SD vs NVMe) and size budget? → **Off by default; 20 GB cap when enabled.**
 11. **Resume:** resume the last video after a reboot or power cut, or always start idle? Resume each video where it left off? → **Start idle; per-video resume off for short kids' videos (configurable).**
-12. **Maximum volume cap:** what level is safe for the room or speaker? → **80 %.**
+12. **Maximum volume cap:** what level is safe for the room or speaker? → **100 %** (editable as `playback.max_volume`; USB speakers are often quiet below that).
 13. **Locked screen look:** black, a calm logo or photo, or a visual clock or routine image? → **Black.**
 14. **Hostname, `device.id` and name:** → **`kiosk` / `kids_kiosk` / "Kids Kiosk".**
 15. **YouTube Premium / cookies:** is a Premium account available to cut bot-check friction? (No ads appear either way, because yt-dlp fetches the raw streams.) → **No cookies.**

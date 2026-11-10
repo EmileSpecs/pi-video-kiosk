@@ -120,7 +120,7 @@ class PlaybackConfig(BaseModel):
     ytdl_format: str = "bv*[height<=?720][vcodec^=avc1]+ba[acodec^=mp4a]/18/b"
     download_timeout_s: int = 300
     default_volume: int = 40
-    max_volume: int = 80
+    max_volume: int = 100
     start_muted: bool = False
     after_video: Literal["loop", "next", "stop", "blank"] = "stop"
     resume_on_boot: bool = False

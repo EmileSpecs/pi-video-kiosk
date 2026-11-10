@@ -31,7 +31,7 @@ playback:
   ytdl_format: "bv*[height<=?720][vcodec^=avc1]+ba[acodec^=mp4a]/18/b"
   download_timeout_s: 300
   default_volume: 40
-  max_volume: 80
+  max_volume: 100
   start_muted: false
   after_video: stop
   resume_on_boot: false

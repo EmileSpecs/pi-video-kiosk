@@ -39,7 +39,7 @@ def test_ensure_route_switches_from_null(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr("pikiosk.audio.set_default_sink", set_default)
-    monkeypatch.setattr("pikiosk.audio.unmute_sink", lambda name, volume_percent=80: None)
+    monkeypatch.setattr("pikiosk.audio.unmute_sink", lambda name, volume_percent=100: None)
     route = ensure_route("auto")
     assert route.changed is True
     assert route.sink and "usb" in route.sink
@@ -54,7 +54,7 @@ def test_ensure_route_noop_when_already_usb(monkeypatch) -> None:
         "pikiosk.audio.set_default_sink",
         lambda name: (_ for _ in ()).throw(AssertionError("should not set")),
     )
-    monkeypatch.setattr("pikiosk.audio.unmute_sink", lambda name, volume_percent=80: None)
+    monkeypatch.setattr("pikiosk.audio.unmute_sink", lambda name, volume_percent=100: None)
     route = ensure_route("auto")
     assert route.changed is False
     assert route.sink == sinks[0].name
