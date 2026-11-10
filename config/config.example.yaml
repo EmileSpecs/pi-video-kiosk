@@ -44,7 +44,7 @@ playback:
     - youtu.be
     - music.youtube.com
   prefer_offline: true
-  audio_device: auto
+  audio_device: auto            # auto prefers a USB speaker via PipeWire; or a pactl sink name / alsa/...
   network_timeout_s: 30
   after_video_scope: playlist
   play_limit_enabled: false  # stop and blank the screen after play_limit_min of one session

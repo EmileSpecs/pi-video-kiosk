@@ -18,6 +18,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import ValidationError
 
 from pikiosk import __version__
+from pikiosk.audio import list_sinks
 from pikiosk.catalog import PLAYLIST_ID_RE, VIDEO_ID_RE, Catalog, CatalogError, parse_ref, thumbnail_url
 from pikiosk.config import CatalogConfig, CatalogItemConfig, ConfigError, KioskConfig
 from pikiosk.config_store import ConfigStore
@@ -624,10 +625,17 @@ def _friendly(exc: Exception) -> str:
     return str(exc)
 
 
+def _audio_sink_names() -> list[str]:
+    try:
+        return [sink.name for sink in list_sinks()]
+    except Exception:
+        return []
+
+
 async def playback_page(request: web.Request) -> web.Response:
     session = _require(request)
     assert isinstance(session, dict)
-    return _render(request, "playback.html", session)
+    return _render(request, "playback.html", session, audio_sinks=_audio_sink_names())
 
 
 async def playback_post(request: web.Request) -> web.Response:
@@ -645,15 +653,20 @@ async def playback_post(request: web.Request) -> web.Response:
                 "allow_unlisted": data.get("allow_unlisted") == "on",
                 "play_limit_enabled": data.get("play_limit_enabled") == "on",
                 "play_limit_min": int(str(data.get("play_limit_min") or store.config.playback.play_limit_min)),
+                "audio_device": str(data.get("audio_device") or "auto").strip() or "auto",
             }
         )
         config = store.config.model_copy(update={"playback": playback})
         config = KioskConfig.model_validate(config.model_dump())
     except (ValidationError, ValueError) as exc:
-        return _render(request, "playback.html", session, error=str(exc))
+        return _render(
+            request, "playback.html", session, error=str(exc), audio_sinks=_audio_sink_names()
+        )
     error = await _save(request, config, dict(store.secrets))
     if error:
-        return _render(request, "playback.html", session, error=error)
+        return _render(
+            request, "playback.html", session, error=error, audio_sinks=_audio_sink_names()
+        )
     raise _done("/playback")
 
 

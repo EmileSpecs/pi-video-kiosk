@@ -5,6 +5,18 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label class="pk-field">Default volume<input class="pk-input" type="number" name="default_volume" value="{{ config.playback.default_volume }}"></label>
   <label class="pk-field">Maximum volume<input class="pk-input" type="number" name="max_volume" value="{{ config.playback.max_volume }}"></label>
+  <label class="pk-field">Audio output
+    <select class="pk-input" name="audio_device">
+      <option value="auto" {% if config.playback.audio_device == "auto" %}selected{% endif %}>auto (prefer USB speaker)</option>
+      {% for sink in audio_sinks or [] %}
+      <option value="{{ sink }}" {% if config.playback.audio_device == sink %}selected{% endif %}>{{ sink }}</option>
+      {% endfor %}
+      {% if config.playback.audio_device not in ["auto"] and config.playback.audio_device not in (audio_sinks or []) %}
+      <option value="{{ config.playback.audio_device }}" selected>{{ config.playback.audio_device }}</option>
+      {% endif %}
+    </select>
+  </label>
+  <p class="text-xs text-slate-500">Status shows the active speaker. With auto, a USB speaker is chosen when plugged in. After plugging one in, wait a few seconds or Save here, then play again.</p>
   <label class="pk-field">After video
     <select class="pk-input" name="after_video">
       {% for mode in ["loop", "next", "stop", "blank"] %}

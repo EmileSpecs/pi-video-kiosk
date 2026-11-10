@@ -20,6 +20,7 @@ class MemoryPlayer:
         self.seek_to: float | None = None
         self.next_count = 0
         self.prev_count = 0
+        self.reload_audio_count = 0
         self.properties: dict[str, Any] = {}
         self._listeners: list[PlayerListener] = []
         self.fail_next = False
@@ -112,6 +113,9 @@ class MemoryPlayer:
 
     async def set_mute(self, muted: bool) -> None:
         self.muted = muted
+
+    async def reload_audio(self) -> None:
+        self.reload_audio_count += 1
 
     async def seek(self, position: float) -> None:
         self.seek_to = position

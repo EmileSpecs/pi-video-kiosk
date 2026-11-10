@@ -11,6 +11,7 @@ from typing import Any
 from aiohttp import web
 
 from pikiosk import __version__
+from pikiosk.audio import ensure_route
 from pikiosk.cache.cache_manager import CacheManager
 from pikiosk.cache.ytdlp import YtDlp, ytdlp_command, ytdlp_runtime_args
 from pikiosk.catalog import Catalog
@@ -131,6 +132,7 @@ class App:
         self._runners: list[web.AppRunner] = []
         self._ytdlp_version = ""
         self.commit = git_commit()
+        self._audio_sink: str | None = None
 
     def status_info(self) -> dict[str, Any]:
         """Facts for the admin Status page that live outside KioskState."""
@@ -138,7 +140,7 @@ class App:
         return {
             "version": __version__,
             "commit": self.commit,
-            "audio_sink": telemetry.get("audio_sink"),
+            "audio_sink": telemetry.get("audio_sink") or self._audio_sink,
             "cache_used_gb": telemetry.get("cache_used_gb"),
             "cache_items": telemetry.get("cache_items"),
             "ytdlp_version": self._ytdlp_version,
@@ -223,6 +225,10 @@ class App:
         config = self.config_store.reload()
         catalog = make_catalog(config)
         await self.controller.apply_config(config, catalog)
+        if isinstance(self.player, MpvPlayer):
+            self.player.audio_device = config.playback.audio_device
+        if not self.simulate:
+            await self._route_audio(reload_player=True)
         reconnect = self.bridge.update_config(config)
         catalog_changed = config.catalog != self.config.catalog
         screen_changed = config.screen != self.config.screen
@@ -258,6 +264,7 @@ class App:
             await self.player.start()
         if not self.simulate:
             await self.screen.apply_orientation()
+            await self._route_audio(reload_player=False)
         await self.bridge.start()
         await self._serve()
         heartbeat = asyncio.create_task(self._heartbeat())
@@ -279,6 +286,7 @@ class App:
     async def _heartbeat(self) -> None:
         while True:
             await asyncio.sleep(10)
+            await self._route_audio(reload_player=True)
             state = self.controller.state
             self.notifier.watchdog()
             self.notifier.status(
@@ -292,6 +300,30 @@ class App:
             await self._refresh_telemetry()
             await asyncio.sleep(max(5, self.config.telemetry.interval_s))
 
+    async def _route_audio(self, *, reload_player: bool) -> None:
+        """Prefer a USB speaker as the PipeWire default; reload mpv when it changes."""
+        if self.simulate:
+            return
+        device = self.config.playback.audio_device or "auto"
+        # Explicit alsa/... strings are handed to mpv; do not fight PipeWire.
+        if device != "auto" and "/" in device:
+            if isinstance(self.player, MpvPlayer):
+                self.player.audio_device = device
+            return
+        preferred = "auto" if device == "auto" else device
+        try:
+            route = await asyncio.to_thread(ensure_route, preferred)
+        except Exception:
+            log.warning("audio route failed", exc_info=True)
+            return
+        if route.sink:
+            self._audio_sink = route.sink
+        if route.changed and reload_player and hasattr(self.player, "reload_audio"):
+            try:
+                await self.player.reload_audio()
+            except Exception:
+                log.warning("mpv audio reload failed", exc_info=True)
+
     async def _refresh_telemetry(self) -> None:
         ytdlp = self.controller.ytdlp
         if ytdlp is not None and not self._ytdlp_version:
@@ -300,7 +332,10 @@ class App:
             except Exception:
                 log.warning("yt-dlp version failed", exc_info=True)
         used_gb, items = await asyncio.to_thread(cache_usage, self.config.offline.directory)
-        sink = None if self.simulate else await asyncio.to_thread(audio_sink)
+        sink = self._audio_sink
+        if not self.simulate:
+            sink = await asyncio.to_thread(audio_sink) or sink
+            self._audio_sink = sink
         payload = await asyncio.to_thread(
             collect,
             mqtt_host=self.config.mqtt.host,

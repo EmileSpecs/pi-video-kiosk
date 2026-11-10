@@ -121,6 +121,16 @@ class MpvPlayer:
         for index, name in enumerate(OBSERVED, start=1):
             await self._cmd("observe_property", index, name)
 
+    async def reload_audio(self) -> None:
+        """Re-open the AO after PipeWire's default sink changes (USB plug-in)."""
+        try:
+            await self._cmd("ao-reload")
+        except MpvError as exc:
+            log.warning("ao-reload failed error=%s", exc)
+            return
+        await self.set_volume(self.volume)
+        await self.set_mute(self.muted)
+
     async def _request_restart(self) -> None:
         loop = asyncio.get_running_loop()
         # loop.time() is seconds since boot on Linux, so a plain 0.0 default
